@@ -1,0 +1,15 @@
+image:
+  repository: forge-tenant-web
+  tag: dev
+  pullPolicy: IfNotPresent
+replicas: 1
+api:
+  upstream: http://forge-tenant
+resources:
+  requests: {cpu: 25m, memory: 32Mi}
+  limits: {memory: 128Mi}
+ingress:
+  enabled: false
+  className: ""
+  host: ""
+  tlsSecret: ""
