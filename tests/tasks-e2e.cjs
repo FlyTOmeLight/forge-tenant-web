@@ -59,7 +59,7 @@ fs.mkdirSync(evidence, { recursive: true });
     }
     async function open() {
       await page.goto(base + "/tasks");
-      await page.locator("#tenant").selectOption(pilot.tenantId);
+      await page.locator("#tenant-switch").selectOption(pilot.tenantId);
       await page.locator(`[data-open="${pilot.taskId}"]`).waitFor();
       await page.locator(`[data-open="${pilot.taskId}"]`).click();
       await page
@@ -140,8 +140,6 @@ fs.mkdirSync(evidence, { recursive: true });
     );
     console.log(JSON.stringify({ phase: "human-stop-passed" }));
     await page.reload();
-    await page.locator(`[data-open="${pilot.taskId}"]`).waitFor();
-    await page.locator(`[data-open="${pilot.taskId}"]`).click();
     await page.locator('[data-action="Resume"]').waitFor();
     d = await detail();
     assert.equal(d.task.control, "Human");

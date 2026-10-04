@@ -104,7 +104,48 @@ export interface Discussion {
     };
   }[];
 }
+export interface Judgment {
+  status: string;
+  summary?: string;
+}
+export interface CodingSettings {
+  version: number;
+  baseBranch: string;
+  model: string;
+  allowedPaths: string[];
+  checks: string[];
+  repairLimit: number;
+  timeoutMinutes: number;
+  checkedAt?: string | null;
+}
+export interface SettingsResponse {
+  settings: CodingSettings;
+  branches: { name: string }[];
+  executors: { worker_id: string; last_seen: string }[];
+  canManage: boolean;
+}
+export interface Connections {
+  gitlab: { status: string; url?: string };
+  model: { status: string; models?: string[] };
+  identity: { status: string; organization?: string };
+}
+export interface Access {
+  read: boolean;
+  write: boolean;
+  manage: boolean;
+  level: number;
+}
 export interface Task {
+  tenantId: string;
+  projectId: string;
+  reviewerIds: string[];
+  updatedAt: string;
+  baseBranch: string;
+  reproduce: string;
+  constraints: string;
+  reference: string;
+  question?: string;
+  agentJudgment: Judgment;
   id: string;
   title: string;
   description: string;
@@ -134,11 +175,14 @@ export interface Feedback {
   head: string;
 }
 export interface Run {
+  config_snapshot?: CodingSettings;
   id: string;
   status: string;
   created_at: string;
   requirements: string;
   output: {
+    judgment?: Judgment;
+    configVersion?: number;
     summary?: string;
     durationSeconds?: number;
     checksCommit?: string;

@@ -13,7 +13,13 @@ import type {
 } from "../types";
 import StatusBadge from "../components/StatusBadge.vue";
 import FormDialog from "../components/FormDialog.vue";
+import CodingWorkspace from "./CodingWorkspace.vue";
+import { demo } from "../prototype";
 const navs = [
+  ["tasks", "任务工作台"],
+  ["reviews", "待我审查"],
+  ["spaces", "项目空间"],
+  ["connections", "服务连接"],
   ["tenants", "企业管理"],
   ["members", "成员与团队"],
   ["projects", "项目与权限"],
@@ -45,7 +51,9 @@ const user = ref<User>(),
   tenants = ref<Tenant[]>([]),
   data = ref<Snapshot>(),
   current = ref(sessionStorage.getItem("forge-tenant") || "");
-const view = ref(location.hash.slice(1) || "tenants"),
+const defaultView =
+  demo || location.pathname === "/tasks" ? "tasks" : "tenants";
+const view = ref(location.hash.slice(1) || defaultView),
   query = ref(""),
   tab = ref("members"),
   loading = ref(false),
@@ -54,14 +62,30 @@ const status = ref("正在读取企业数据…"),
   toast = ref("");
 let poll: ReturnType<typeof setInterval>,
   toastTimer: ReturnType<typeof setTimeout>;
+const refreshVersion = ref(0);
+function refreshAll() {
+  refreshVersion.value++;
+  void refresh();
+}
 const manage = computed(() => !!data.value?.can_manage);
 const tenant = computed(() => data.value?.tenant);
 const members = computed(() => data.value?.members || []),
   projects = computed(() => data.value?.projects || []),
   grants = computed(() => data.value?.grants || []);
 const operations = computed(() => data.value?.operations || []);
+const coding = computed(() =>
+  ["tasks", "reviews", "spaces", "connections", "task", "project"].includes(
+    view.value.split("/")[0]!,
+  ),
+);
 const heading = computed(
-  () => navs.find((n) => n[0] === view.value)?.[1] || "企业管理",
+  () =>
+    navs.find((n) => n[0] === view.value)?.[1] ||
+    (view.value.startsWith("task/")
+      ? "任务详情"
+      : view.value.startsWith("project/")
+        ? "项目执行配置"
+        : "企业管理"),
 );
 const matches = (...values: unknown[]) =>
   values.join(" ").toLowerCase().includes(query.value.toLowerCase());
@@ -117,7 +141,10 @@ async function enter(id: string) {
 }
 function hashChanged() {
   const next = location.hash.slice(1);
-  view.value = navs.some((n) => n[0] === next) ? next : "tenants";
+  view.value =
+    navs.some((n) => n[0] === next) || /^(task|project)\//.test(next)
+      ? next
+      : defaultView;
   query.value = "";
 }
 watch(heading, (v) => (document.title = "Forge · " + v));
@@ -437,6 +464,7 @@ async function copyInvitation() {
   }
 }
 async function logout() {
+  if (demo) return;
   try {
     await api("/auth/logout", { method: "POST", body: "{}" });
     location.assign("/auth/login");
@@ -470,6 +498,22 @@ onUnmounted(() => {
   clearTimeout(toastTimer);
   window.removeEventListener("hashchange", hashChanged);
 });
+async function switchDemo(id: string) {
+  demo?.setUser(id);
+  const info = await api<{ user: User; csrf_token: string }>("/api/v1/me");
+  user.value = info.user;
+  await refresh();
+}
+async function acceptDemo(id: string) {
+  demo?.acceptInvitation(id);
+  await refresh();
+}
+async function resetDemo() {
+  demo?.reset();
+  current.value = "";
+  navigate("tasks");
+  await switchDemo(demo!.user().id);
+}
 const actionNames: Record<string, string> = {
   create_tenant: "创建企业",
   update_tenant: "变更企业状态",
@@ -517,7 +561,7 @@ const actionNames: Record<string, string> = {
         {{ t.name }}
       </option>
     </select>
-    <div class="nav-label">组织与访问</div>
+    <div class="nav-label">研发与组织</div>
     <nav id="nav">
       <button
         v-for="[id, label] in navs"
@@ -550,7 +594,9 @@ const actionNames: Record<string, string> = {
           </div>
         </div>
       </div>
-      <button id="logout" class="btn link" @click="logout">退出登录</button>
+      <button v-if="!demo" id="logout" class="btn link" @click="logout">
+        退出登录
+      </button>
     </div>
   </aside>
   <div class="workspace">
@@ -571,12 +617,30 @@ const actionNames: Record<string, string> = {
         </div>
       </div>
       <div class="top-links">
-        <a class="btn small" href="/tasks">代码修复</a
-        ><button class="btn small" :disabled="loading" @click="refresh">
+        <button
+          id="refresh"
+          class="btn small"
+          :disabled="loading"
+          @click="refreshAll"
+        >
           刷新数据
         </button>
       </div>
     </header>
+    <div v-if="demo" class="prototype-banner">
+      <strong>交互原型 · 数据仅保存在本机，不连接 GitLab 或模型</strong
+      ><label
+        >体验角色
+        <select
+          :value="user?.id"
+          @change="switchDemo(($event.target as HTMLSelectElement).value)"
+        >
+          <option v-for="u in demo.users" :key="u.id" :value="u.id">
+            {{ u.name }} · {{ u.roleLabel }}
+          </option>
+        </select></label
+      ><button class="btn small" @click="resetDemo">重置演示</button>
+    </div>
     <div id="status" class="status-banner" role="status">{{ status }}</div>
     <main
       id="main"
@@ -585,7 +649,7 @@ const actionNames: Record<string, string> = {
       tabindex="-1"
       :aria-busy="loading"
     >
-      <div class="heading">
+      <div v-if="!coding" class="heading">
         <div>
           <h1>{{ heading }}</h1>
           <p class="subtitle">
@@ -632,6 +696,16 @@ const actionNames: Record<string, string> = {
         <h3>尚未加入企业</h3>
         <p>请创建企业，或接受管理员发来的邀请。</p>
       </div>
+      <CodingWorkspace
+        v-else-if="coding && data && user"
+        :key="current + user.id"
+        :snapshot="data"
+        :refresh-version="refreshVersion"
+        :user="user"
+        :view="view"
+        @navigate="navigate"
+        @add-project="action('add-project')"
+      />
       <section v-else-if="view === 'tenants'" class="panel">
         <div class="toolbar">
           <input
@@ -792,6 +866,13 @@ const actionNames: Record<string, string> = {
                   </td>
                   <td>
                     <div v-if="manage" class="cell-actions">
+                      <button
+                        v-if="demo && m.status === 'invited'"
+                        class="btn small"
+                        @click="acceptDemo(m.id)"
+                      >
+                        模拟接受邀请
+                      </button>
                       <button
                         v-if="m.status === 'invited'"
                         class="btn link"

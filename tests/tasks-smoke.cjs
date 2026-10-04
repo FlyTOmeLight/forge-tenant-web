@@ -116,8 +116,26 @@ const root = path.resolve(__dirname, ".."),
         title: "Vue task UI verification",
       },
     );
+    const settingsPath = `/api/v1/tenants/${tid}/projects/${project.id}/coding-settings`;
+    const settings = (await api("GET", settingsPath)).settings;
+    const models = (await api("GET", "/api/v1/coding/connections")).model
+      .models;
+    assert.ok(
+      models.length,
+      "A model listing endpoint is required; this test does not infer",
+    );
+    await api("PUT", settingsPath, {
+      version: settings.version,
+      baseBranch: remote.default_branch,
+      model: models[0],
+      allowedPaths: ["vue-smoke.txt"],
+      checks: ["git diff --check"],
+      repairLimit: 1,
+      timeoutMinutes: 1,
+    });
+    await api("POST", settingsPath + "/check", {});
     await p.goto(base + "/tasks");
-    await p.locator("#tenant").selectOption(tid);
+    await p.locator("#tenant-switch").selectOption(tid);
     await p
       .getByRole("button", { name: "关联修复任务", exact: true })
       .waitFor();
@@ -205,7 +223,7 @@ const root = path.resolve(__dirname, ".."),
     for (const width of [375, 768, 1024, 1440]) {
       await p.setViewportSize({ width, height: 1000 });
       await p.reload();
-      await p.locator(`[data-open="${t.id}"]`).click();
+
       await p.locator("[data-tab=checks]").click();
       await p.locator("[data-action=Resume]").waitFor();
       assert.equal(
@@ -221,6 +239,37 @@ const root = path.resolve(__dirname, ".."),
           fullPage: true,
         });
     }
+    // Direct creation produces a queued round and no empty MR.
+    await p.goto(base + "/#project/" + project.id);
+    await p.getByRole("button", { name: "新建修复任务", exact: true }).click();
+    for (const [name, value] of Object.entries({
+      title: "New problem migration check",
+      description: "Protocol fixture only",
+      reproduce: "Open a fresh task",
+      criteria: "Queue without creating an empty MR",
+    }))
+      await dialog.locator(`[name=${name}]`).fill(value);
+    await dialog.locator("[name=synthetic]").selectOption("true");
+    await dialog.locator("[type=submit]").click();
+    await dialog.waitFor({ state: "hidden" });
+    await p
+      .getByRole("heading", { name: "New problem migration check" })
+      .waitFor();
+    const fresh = (await api("GET", taskPath)).items.find(
+      (t) => t.title === "New problem migration check",
+    );
+    assert.equal(fresh.mrIid, 0);
+    assert.equal(fresh.status, "Queued");
+    const created = await api("GET", taskPath + "/" + fresh.id);
+    assert.equal(created.runs[0].config_snapshot.repairLimit, 1);
+    await action("Cancel");
+    assert.equal(
+      (await api("GET", taskPath + "/" + fresh.id)).task.status,
+      "Canceled",
+    );
+    checks.push(
+      "Vue 项目配置检查、直接新建任务和轮次快照；不创建空 MR；取消测试队列",
+    );
     assert.deepEqual(errors, []);
     checks.push("任务页四档宽度无溢出或脚本异常，弹窗 Escape 恢复焦点");
     fs.writeFileSync(

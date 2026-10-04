@@ -41,7 +41,7 @@ async function submit() {
   } catch (e) {
     error.value =
       e instanceof APIError && e.status === 412
-        ? "企业数据已更新，请关闭弹窗、刷新数据后重新操作。"
+        ? "数据已更新，请关闭弹窗、刷新数据后重新操作。"
         : message(e);
   } finally {
     busy.value = false;
@@ -110,6 +110,7 @@ function close() {
           />
           <small v-if="field.help">{{ field.help }}</small>
         </label>
+        <slot name="after-fields" :busy="busy" />
       </div>
       <div class="modal-foot">
         <button class="btn" type="button" :disabled="busy" @click="close">

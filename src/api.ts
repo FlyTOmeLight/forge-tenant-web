@@ -1,3 +1,4 @@
+import { demo } from "./prototype";
 let csrf = "";
 export class APIError extends Error {
   constructor(
@@ -15,6 +16,7 @@ export async function api<T>(
   options: RequestInit = {},
   redirect = true,
 ): Promise<T> {
+  if (demo) return (await demo.request(path, options)) as T;
   const headers = new Headers(options.headers);
   headers.set("Content-Type", "application/json");
   if (options.method && !["GET", "HEAD"].includes(options.method))

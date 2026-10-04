@@ -72,10 +72,23 @@ Vue 提供组件与响应式表单，Vite 负责 SFC 编译和生产打包；Typ
 
 为保留另一会话对原平台的并行修改，本轮使用 namespace `forge-tenant-split`、独立 PostgreSQL 和 OIDC client `forge-tenant-split-console`，浏览器入口为 `http://127.0.0.1:8483`。该环境中的企业和项目是验收数据；原 `forge-tenant` / 8383 及其数据未被切换或覆盖。
 
-继续更新此验证环境时使用 `FORGE_NAMESPACE=forge-tenant-split FORGE_IMAGE_TAG=0.2.0-final ./scripts/deploy-lab.sh`。前端 E2E 同时设置 `FORGE_NAMESPACE=forge-tenant-split`。本机端口转发命令：
+继续更新此验证环境时使用 `FORGE_NAMESPACE=forge-tenant-split FORGE_IMAGE_TAG=0.3.0-migration ./scripts/deploy-lab.sh`。前端 E2E 同时设置 `FORGE_NAMESPACE=forge-tenant-split`。本机端口转发命令：
 
 ```sh
 kubectl --context orbstack -n forge-tenant-split port-forward service/forge-tenant-web 8483:80
 ```
 
-本轮迁移以开始时的功能快照为准，包括当时的 MR 关联任务；开发过程中新增的项目执行配置、直接创建问题任务等留在原仓库，后续单独迁入。
+后续功能已迁入：项目执行配置与接入检查、直接新建问题任务、多审查者、每轮配置快照、Agent 判断、代码差异，以及统一导航下的三种任务布局。真实模型完整交付验收作为下一步单独执行。
+
+## 任务工作台与原型
+
+`/#tasks`、`/#reviews`、`/#spaces`、`/#project/<project-id>` 与 `/#connections` 共用企业上下文和导航。任务详情支持概览、代码差异与补丁下载、评论、检查/模型判断/人工认可、轮次配置及活动记录。
+
+`/prototype.html` 使用同一 Vue 页面和显式本地传输层，提供角色切换、接受邀请、状态事件模拟和重置；不会调用真实 API。`npm run export:prototype` 输出 `dist/forge-prototype.html`，可以离线打开。
+
+```sh
+npm run export:prototype
+FORGE_PROTOTYPE_URL="file://$PWD/dist/forge-prototype.html" npm run test:prototype
+```
+
+`npm run test:whole-app` 为真实模型修复试点，要求 `FORGE_CONFIG`、`FORGE_TASK_PILOT` 指向后端私有配置，项目中已部署对应执行器。它会修改 GitLab 试点项目，迁移回归不运行该命令。
