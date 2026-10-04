@@ -72,7 +72,7 @@ Vue 提供组件与响应式表单，Vite 负责 SFC 编译和生产打包；Typ
 
 为保留另一会话对原平台的并行修改，本轮使用 namespace `forge-tenant-split`、独立 PostgreSQL 和 OIDC client `forge-tenant-split-console`，浏览器入口为 `http://127.0.0.1:8483`。该环境中的企业和项目是验收数据；原 `forge-tenant` / 8383 及其数据未被切换或覆盖。
 
-继续更新此验证环境时使用 `FORGE_NAMESPACE=forge-tenant-split FORGE_IMAGE_TAG=0.4.1-permissions ./scripts/deploy-lab.sh`。前端 E2E 同时设置 `FORGE_NAMESPACE=forge-tenant-split`。本机端口转发命令：
+继续更新此验证环境时使用 `FORGE_NAMESPACE=forge-tenant-split FORGE_IMAGE_TAG=0.5.1-roles ./scripts/deploy-lab.sh`。前端 E2E 同时设置 `FORGE_NAMESPACE=forge-tenant-split`。本机端口转发命令：
 
 ```sh
 kubectl --context orbstack -n forge-tenant-split port-forward service/forge-tenant-web 8483:80
@@ -96,3 +96,14 @@ FORGE_PROTOTYPE_URL="file://$PWD/dist/forge-prototype.html" npm run test:prototy
 ```
 
 `npm run test:whole-app` 为真实模型修复试点，要求 `FORGE_CONFIG`、`FORGE_TASK_PILOT` 指向后端私有配置，项目中已部署对应执行器。它会修改 GitLab 试点项目，迁移回归不运行该命令。
+
+## 角色、团队与权限查询
+
+- **我的权限**：每位成员可查看租户角色、所属团队、项目有效角色、具体操作能力和授权来源。
+- **角色与权限**：租户设置内展示内置角色及其操作边界。租户角色在成员设置中分配，项目角色在项目内分配。
+- **成员与团队 → 查看权限**：租户管理员查看成员的完整权限；团队页支持添加、移出成员，一个人可加入多个团队。
+- **项目 → 成员与权限**：分别管理个人直接角色和团队角色。列表展示聚合目标、当前有效角色、来源和 GitLab 同步状态。
+
+项目权限取各来源最高角色。移出团队或撤销一条授权时，其余来源保留。团队角色最终同步为 GitLab 的每人项目角色。任务负责人、指定审查者和受保护分支的限制继续生效。
+
+前后端配套使用版本 5 数据结构；原型使用独立演示存储版本，重置后可演练团队角色继承与撤销。

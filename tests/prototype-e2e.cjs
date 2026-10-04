@@ -143,6 +143,68 @@ const base =
         .click();
       await page.getByRole("heading", { name: label, exact: true }).waitFor();
     }
+    await button("角色与权限").click();
+    await page.getByRole("heading", { name: "开发者", exact: true }).waitFor();
+    await button("成员与团队").click();
+    await button("团队").click();
+    await button("创建团队").click();
+    await dialog.locator("[name=name]").fill("权限验收团队");
+    await dialog.locator("[type=submit]").click();
+    await dialog.waitFor({ state: "hidden" });
+    await page
+      .locator("tr")
+      .filter({ hasText: "权限验收团队" })
+      .getByRole("button", { name: "查看成员" })
+      .click();
+    await button("添加团队成员").click();
+    await dialog.locator("[name=member]").selectOption("m-2");
+    await dialog.locator("[type=submit]").click();
+    await dialog.waitFor({ state: "hidden" });
+    await page.evaluate(() => (location.hash = "project/p-0/members"));
+    await button("分配团队角色").click();
+    await dialog
+      .locator("[name=team]")
+      .selectOption({ label: "权限验收团队 · 1 位成员" });
+    await dialog.locator("[name=role]").selectOption("admin");
+    await dialog.locator("[type=submit]").click();
+    await dialog.waitFor({ state: "hidden" });
+    await page.getByLabel("体验角色").selectOption("u-chen");
+    await button("我的权限").click();
+    await page.getByRole("heading", { name: "陈澄 · 权限概览" }).waitFor();
+    const permissionProject = page
+      .locator(".permission-project")
+      .filter({ hasText: "billing-api" });
+    await permissionProject
+      .getByText("当前有效：项目管理员", { exact: true })
+      .waitFor();
+    await permissionProject
+      .getByText("团队 · 权限验收团队 → 项目管理员", { exact: true })
+      .waitFor();
+    await page.getByLabel("体验角色").selectOption("u-lin");
+    await button("成员与团队").click();
+    await button("团队").click();
+    await page
+      .locator("tr")
+      .filter({ hasText: "权限验收团队" })
+      .getByRole("button", { name: "查看成员" })
+      .click();
+    await button("移出团队").click();
+    await dialog.locator("[type=submit]").click();
+    await dialog.waitFor({ state: "hidden" });
+    await page.getByLabel("体验角色").selectOption("u-chen");
+    await button("我的权限").click();
+    await permissionProject
+      .getByText("当前有效：开发者", { exact: true })
+      .waitFor();
+    assert.equal(
+      await permissionProject
+        .getByText("团队 · 权限验收团队 → 项目管理员", { exact: true })
+        .count(),
+      0,
+    );
+    await page.getByLabel("体验角色").selectOption("u-lin");
+    await page.getByRole("heading", { name: "林予安 · 权限概览" }).waitFor();
+    await button("我的任务").click();
     for (const width of [375, 768, 1024, 1440]) {
       await page.setViewportSize({ width, height: 1000 });
       assert.equal(
@@ -172,6 +234,8 @@ const base =
           "configuration recheck",
           "reviewer permissions",
           "scope-based navigation and platform isolation",
+          "role catalogue and personal permissions",
+          "team role inheritance and direct role preservation",
           "developer selects project reviewer",
           "review queue includes other owners",
           "responsive widths",

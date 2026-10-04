@@ -176,3 +176,35 @@ button[aria-pressed="true"] {
 .project-tabs {
   margin: 0 0 24px;
 }
+.permission-summary,
+.permission-body,
+.role-card {
+  padding: 20px;
+}
+.permission-project,
+.role-section {
+  margin-top: 20px;
+}
+.permission-actions {
+  list-style: none;
+  padding: 0;
+  display: grid;
+  gap: 10px;
+}
+.permission-allowed {
+  color: #176b50;
+}
+.role-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr));
+  gap: 16px;
+}
+.role-card li,
+.permission-details li {
+  margin-bottom: 8px;
+}
+.permission-details summary {
+  cursor: pointer;
+  font-weight: 600;
+  padding: 8px 0;
+}

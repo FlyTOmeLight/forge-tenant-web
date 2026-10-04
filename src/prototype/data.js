@@ -1,8 +1,9 @@
+import roleDefinitions from "./roles.json";
 import { TaskFlow } from "./state.js";
 /* Explicit local prototype transport. Live mode never uses these records. */
 export function createPrototype() {
   "use strict";
-  const key = "forge-vue-prototype-v2",
+  const key = "forge-vue-prototype-v3",
     now = () => new Date().toISOString();
   const users = [
     {
@@ -53,8 +54,7 @@ export function createPrototype() {
       role: i === 0 ? "admin" : "member",
       status: "active",
       gitlab_id: i + 1,
-      team_id: "team-1",
-      team_name: "应用研发",
+      teams: [{ id: "team-1", name: "应用研发" }],
     }));
     const projects = ["billing-api", "agentic-kit", "portal-web"].map(
       (name, i) => ({
@@ -70,6 +70,7 @@ export function createPrototype() {
         membership_id: m.id,
         name: m.name,
         member_status: "active",
+        direct_level: [40, 20, 30][i],
         desired_level: [40, 20, 30][i],
         observed_level: [40, 20, 30][i],
         effective_level: [40, 20, 30][i],
@@ -227,6 +228,7 @@ export function createPrototype() {
       members,
       projects,
       grants,
+      teamGrants: [],
       teams: [{ id: "team-1", name: "应用研发", tenant_id: "demo-tenant" }],
       settings,
       tasks,
@@ -509,7 +511,15 @@ export function createPrototype() {
       members: db.members.filter(
         (m) => belongs(m) && (admin || m.user_id === user().id),
       ),
-      teams: admin ? db.teams.filter(belongs) : [],
+      teams: admin
+        ? db.teams.filter(belongs).map((t) => ({
+            ...t,
+            member_count: db.members.filter(
+              (m) =>
+                m.status === "active" && m.teams?.some((x) => x.id === t.id),
+            ).length,
+          }))
+        : [],
       projects: db.projects
         .filter((p) => belongs(p) && projectPermissions(p.id).viewProject)
         .map((p) => ({ ...p, permissions: projectPermissions(p.id) })),
@@ -524,6 +534,8 @@ export function createPrototype() {
         )
         .map((g) => ({
           ...g,
+          direct_role: roleName(g.direct_level || 0),
+          sources: grantSources(g.project_id, g.membership_id),
           desired_role: roleName(g.desired_level),
           observed_role: roleName(g.observed_level),
           effective_role: roleName(
@@ -534,6 +546,123 @@ export function createPrototype() {
         })),
       operations: admin ? db.operations.filter(belongs) : [],
       audit: admin ? db.audit.filter(belongs) : [],
+    };
+  }
+
+  function grantSources(pid, mid) {
+    const direct =
+      db.grants.find((g) => g.project_id === pid && g.membership_id === mid)
+        ?.direct_level || 0;
+    const m = db.members.find((m) => m.id === mid);
+    const sources = direct
+      ? [{ kind: "direct", id: mid, name: "直接分配", role: roleName(direct) }]
+      : [];
+    for (const g of db.teamGrants.filter(
+      (g) => g.project_id === pid && m?.teams?.some((t) => t.id === g.team_id),
+    )) {
+      const t = db.teams.find((t) => t.id === g.team_id);
+      sources.push({
+        kind: "team",
+        id: t.id,
+        name: t.name,
+        role: roleName(g.level),
+      });
+    }
+    return sources;
+  }
+  const roleLevel = (role) =>
+    ({ reviewer: 20, developer: 30, admin: 40 })[role] || 0;
+  function recomputeGrants(tid) {
+    for (const p of db.projects.filter((p) => p.tenant_id === tid))
+      for (const m of db.members.filter((m) => m.tenant_id === tid)) {
+        const sources = grantSources(p.id, m.id),
+          desired =
+            m.status === "active"
+              ? Math.max(0, ...sources.map((s) => roleLevel(s.role)))
+              : 0;
+        let g = db.grants.find(
+          (g) => g.project_id === p.id && g.membership_id === m.id,
+        );
+        if (!g && desired) {
+          g = {
+            tenant_id: tid,
+            project_id: p.id,
+            membership_id: m.id,
+            name: m.name,
+            member_status: m.status,
+            direct_level: 0,
+          };
+          db.grants.push(g);
+        }
+        if (g)
+          Object.assign(g, {
+            desired_level: desired,
+            observed_level: desired,
+            effective_level: desired,
+            checked_at: now(),
+          });
+      }
+  }
+  function permissionReport(tid, mid) {
+    const m = db.members.find(
+      (m) =>
+        m.tenant_id === tid &&
+        (mid ? m.id === mid : m.user_id === user().id) &&
+        m.status !== "removed",
+    );
+    if (!m || (!tenantAdmin(tid) && m.user_id !== user().id))
+      throw Error("不能查看此成员权限。");
+    const admin = m.role === "admin" && m.status === "active",
+      active = tenant(tid).status === "active" && m.status === "active";
+    return {
+      member: {
+        ...m,
+        user_status: "active",
+        tenant_status: tenant(tid).status,
+        operator: !!users.find((u) => u.id === m.user_id)?.operator,
+      },
+      teams: m.teams || [],
+      tenantPermissions: {
+        manageMembers: admin && active,
+        manageProjects: admin && active,
+        viewSettings: admin,
+        viewAudit: admin,
+        viewSync: admin,
+      },
+      projects: db.projects
+        .filter(
+          (p) =>
+            p.tenant_id === tid &&
+            (admin ||
+              db.grants.some(
+                (g) => g.project_id === p.id && g.membership_id === m.id,
+              )),
+        )
+        .map((p) => {
+          const g = db.grants.find(
+              (g) => g.project_id === p.id && g.membership_id === m.id,
+            ),
+            n = level(p.id, m.user_id);
+          return {
+            id: p.id,
+            name: p.name,
+            desiredRole: roleName(g?.desired_level || 0),
+            effectiveRole: roleName(n),
+            reason: !active
+              ? "租户或成员未激活"
+              : n
+                ? "已生效"
+                : "未分配项目代码角色",
+            sources: grantSources(p.id, m.id),
+            permissions: {
+              viewProject: admin || n >= 20,
+              readCode: n >= 20,
+              createTask: n >= 30,
+              manageMembers: active && (admin || n >= 40),
+              configureExecution: n >= 40,
+            },
+          };
+        }),
     };
   }
   const connections = () => ({
@@ -553,6 +682,7 @@ export function createPrototype() {
       b = options.body ? JSON.parse(options.body) : {},
       parts = path.split("/").filter(Boolean);
     let result;
+    if (path === "/api/v1/roles") return { items: roleDefinitions };
     if (path === "/api/v1/me")
       return {
         user: user(),
@@ -613,6 +743,7 @@ export function createPrototype() {
         role: "admin",
         status: "active",
         gitlab_id: 1,
+        teams: [],
       });
       save();
       return { tenant_id: id, message: "原型企业已创建" };
@@ -621,11 +752,74 @@ export function createPrototype() {
     const tid = parts[3];
     const tenantSnapshot = snapshot(tid);
     if (parts.length === 4 && method === "GET") return tenantSnapshot;
+    if (parts[4] === "permissions" && parts[5] === "me")
+      return permissionReport(tid);
+    if (parts[4] === "members" && parts[6] === "permissions")
+      return permissionReport(tid, parts[5]);
+    if (parts[4] === "teams" && parts[6] === "members") {
+      if (!tenantSnapshot.permissions.manageMembers)
+        throw Error("需要租户管理权限。");
+      const t = db.teams.find((t) => t.tenant_id === tid && t.id === parts[5]),
+        m = db.members.find(
+          (m) =>
+            m.tenant_id === tid && m.id === parts[7] && m.status === "active",
+        );
+      if (!t || !m) throw Error("团队或已激活成员不存在。");
+      m.teams = m.teams.filter((x) => x.id !== t.id);
+      if (method !== "DELETE") m.teams.push({ id: t.id, name: t.name });
+      recomputeGrants(tid);
+      tenant(tid).version++;
+      save();
+      return { team_id: t.id };
+    }
     if (parts[4] === "projects" && parts[5]) {
       const pid = parts[5],
         a = access(pid);
-      if (!a.read && !["grants", "grant-candidates"].includes(parts[6]))
+      if (
+        !a.read &&
+        !["grants", "grant-candidates", "team-grants"].includes(parts[6])
+      )
         throw Error("没有项目访问权限。");
+      if (parts[6] === "team-grants") {
+        if (!projectPermissions(pid).manageMembers)
+          throw Error("需要项目成员管理权限。");
+        if (method === "GET")
+          return {
+            items: db.teams
+              .filter((t) => t.tenant_id === tid)
+              .map((t) => ({
+                ...t,
+                role: roleName(
+                  db.teamGrants.find(
+                    (g) => g.project_id === pid && g.team_id === t.id,
+                  )?.level || 0,
+                ),
+                member_count: db.members.filter(
+                  (m) =>
+                    m.status === "active" &&
+                    m.teams?.some((x) => x.id === t.id),
+                ).length,
+              })),
+          };
+        const t = db.teams.find(
+          (t) => t.tenant_id === tid && t.id === parts[7],
+        );
+        if (!t) throw Error("团队不存在。");
+        db.teamGrants = db.teamGrants.filter(
+          (g) => !(g.project_id === pid && g.team_id === t.id),
+        );
+        if (method !== "DELETE")
+          db.teamGrants.push({
+            tenant_id: tid,
+            project_id: pid,
+            team_id: t.id,
+            level: roleLevel(b.role),
+          });
+        recomputeGrants(tid);
+        tenant(tid).version++;
+        save();
+        return { team_id: t.id };
+      }
       if (parts[6] === "access") return a;
       if (parts[6] === "people")
         return {
@@ -789,12 +983,8 @@ export function createPrototype() {
           };
           db.grants.push(g);
         }
-        Object.assign(g, {
-          desired_level: v,
-          observed_level: v,
-          effective_level: v,
-          checked_at: now(),
-        });
+        g.direct_level = v;
+        recomputeGrants(tid);
         result = { message: "原型项目授权已更新" };
       }
     } else {
@@ -819,6 +1009,7 @@ export function createPrototype() {
             role: b.role,
             status: "invited",
             gitlab_id: null,
+            teams: [],
           };
           db.members.push(m);
           result = {
@@ -827,9 +1018,11 @@ export function createPrototype() {
           };
         } else if (method === "DELETE") {
           m.status = "removed";
+          m.teams = [];
           db.grants
             .filter((g) => g.membership_id === m.id)
             .forEach((g) => {
+              g.direct_level = 0;
               g.desired_level = 0;
               g.effective_level = 0;
               g.observed_level = 0;
@@ -837,7 +1030,7 @@ export function createPrototype() {
           result = { message: "成员已移除" };
         } else if (method === "PATCH") {
           Object.assign(m, b);
-          m.team_name = db.teams.find((t) => t.id === m.team_id)?.name || "";
+
           result = { message: "成员设置已更新" };
         } else
           result = {
@@ -864,6 +1057,7 @@ export function createPrototype() {
           ).id,
           name: user().name,
           member_status: "active",
+          direct_level: 40,
           desired_level: 40,
           observed_level: 40,
           effective_level: 40,

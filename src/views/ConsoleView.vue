@@ -6,12 +6,17 @@ import StatusBadge from "../components/StatusBadge.vue";
 import FormDialog from "../components/FormDialog.vue";
 import PlatformView from "./PlatformView.vue";
 import CodingWorkspace from "./CodingWorkspace.vue";
+import PermissionDetails from "../components/PermissionDetails.vue";
+import TeamsPanel from "../components/TeamsPanel.vue";
+import RolesView from "./RolesView.vue";
 import { demo } from "../prototype";
 const navs = [
   ["tasks", "我的任务"],
   ["reviews", "待我审查"],
   ["spaces", "项目"],
+  ["my-permissions", "我的权限"],
   ["members", "成员与团队"],
+  ["roles", "角色与权限"],
   ["sync", "权限同步"],
   ["audit", "审计记录"],
   ["platform/tenants", "租户管理"],
@@ -19,12 +24,12 @@ const navs = [
 ];
 const platformPermissions = ref({ managePlatform: false });
 const platformMode = computed(() => view.value.startsWith("platform/"));
-const workspaceNavs = computed(() => navs.slice(0, 3));
+const workspaceNavs = computed(() => navs.slice(0, 4));
 const settingsNavs = computed(() =>
   navs
-    .slice(3, 6)
+    .slice(4, 8)
     .filter(([id]) =>
-      id === "members"
+      id === "members" || id === "roles"
         ? data.value?.permissions.viewSettings
         : id === "sync"
           ? data.value?.permissions.viewSync
@@ -34,7 +39,7 @@ const settingsNavs = computed(() =>
 const visibleNavs = computed(() =>
   platformMode.value
     ? platformPermissions.value.managePlatform
-      ? navs.slice(6)
+      ? navs.slice(8)
       : []
     : [...workspaceNavs.value, ...settingsNavs.value],
 );
@@ -88,7 +93,9 @@ const heading = computed(
 const matches = (...values: unknown[]) =>
   values.join(" ").toLowerCase().includes(query.value.toLowerCase());
 const filteredMembers = computed(() =>
-  members.value.filter((m) => matches(m.name, m.email, m.team_name)),
+  members.value.filter((m) =>
+    matches(m.name, m.email, m.teams.map((t) => t.name).join(" ")),
+  ),
 );
 const filteredAudit = computed(() =>
   (data.value?.audit || []).filter((a) =>
@@ -160,6 +167,7 @@ interface Dialog {
   wide?: boolean;
   invitation?: string;
 }
+const permissionMember = ref("");
 const dialog = shallowRef<Dialog>();
 let dialogKey = 0;
 function show(config: Omit<Dialog, "key">) {
@@ -244,19 +252,6 @@ function action(kind: string, id = "") {
           value: m.role,
           options: companyRoles,
         },
-        {
-          name: "team_id",
-          label: "所属团队",
-          value: m.team_id || "",
-          required: false,
-          options: [
-            { value: "", label: "未分配" },
-            ...(data.value?.teams || []).map((t) => ({
-              value: t.id,
-              label: t.name,
-            })),
-          ],
-        },
       ],
       "保存成员设置",
       (values) => update(`/members/${id}`, "PATCH", values),
@@ -273,7 +268,7 @@ function action(kind: string, id = "") {
   if (kind === "create-team")
     edit(
       "创建团队",
-      "仅管理组织归属，不自动授予项目权限。",
+      "团队可在项目中获得角色。加入团队后，成员会获得对应项目权限。",
       [{ name: "name", label: "团队名称" }],
       "创建团队",
       (values) => update("/teams", "POST", values),
@@ -394,6 +389,10 @@ const actionNames: Record<string, string> = {
   remove_member: "移除成员",
   resend_invitation: "重新邀请",
   create_team: "创建团队",
+  add_team_member: "添加团队成员",
+  remove_team_member: "移出团队成员",
+  set_team_grant: "分配团队项目角色",
+  revoke_team_grant: "撤销团队项目角色",
   add_project: "接入项目",
   set_grant: "设置项目授权",
   revoke_grant: "撤销项目授权",
@@ -586,10 +585,17 @@ const actionNames: Record<string, string> = {
         @enter="enter"
         @changed="refresh"
       />
+      <PermissionDetails
+        v-else-if="view === 'my-permissions' && current"
+        :key="current + (user?.id || '')"
+        :tenant-id="current"
+        :refresh-version="refreshVersion"
+      />
       <div v-else-if="!data" class="empty">
         <h3>尚未加入企业</h3>
         <p>请接受租户管理员发来的邀请。平台管理员可从独立入口管理租户。</p>
       </div>
+      <RolesView v-else-if="view === 'roles'" />
       <CodingWorkspace
         v-else-if="coding && data && user"
         :key="current + user.id"
@@ -617,35 +623,12 @@ const actionNames: Record<string, string> = {
             团队
           </button>
         </div>
-        <section v-if="tab === 'teams' && manage" class="panel">
-          <div class="panel-head">
-            <h2>团队目录</h2>
-            <button class="btn" @click="action('create-team')">创建团队</button>
-          </div>
-          <div v-if="data?.teams.length" class="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>名称</th>
-                  <th>成员数</th>
-                  <th>权限</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr v-for="team in data.teams" :key="team.id">
-                  <td>{{ team.name }}</td>
-                  <td>
-                    {{ members.filter((m) => m.team_id === team.id).length }}
-                  </td>
-                  <td>仅组织归属，不隐含项目授权</td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-          <div v-else class="empty">
-            还没有团队。创建团队后，在成员设置中分配归属。
-          </div>
-        </section>
+        <TeamsPanel
+          v-if="tab === 'teams' && data"
+          :snapshot="data"
+          @changed="refresh"
+          @create="action('create-team')"
+        />
         <section v-else class="panel">
           <div class="toolbar">
             <input
@@ -683,7 +666,9 @@ const actionNames: Record<string, string> = {
                       }}</span
                     >
                   </td>
-                  <td>{{ m.team_name || "未分配" }}</td>
+                  <td>
+                    {{ m.teams.map((t) => t.name).join("、") || "未分配" }}
+                  </td>
                   <td>
                     <span v-if="m.status === 'active'" class="badge good"
                       >已接受</span
@@ -695,33 +680,40 @@ const actionNames: Record<string, string> = {
                     >
                   </td>
                   <td>
-                    <div v-if="manage" class="cell-actions">
+                    <div class="cell-actions">
                       <button
-                        v-if="demo && m.status === 'invited'"
                         class="btn small"
-                        @click="acceptDemo(m.id)"
+                        @click="permissionMember = m.id"
                       >
-                        模拟接受邀请
+                        查看权限
                       </button>
-                      <button
-                        v-if="m.status === 'invited'"
-                        class="btn link"
-                        @click="action('resend', m.id)"
-                      >
-                        重新邀请</button
-                      ><button
-                        class="btn small"
-                        @click="action('edit-member', m.id)"
-                      >
-                        设置</button
-                      ><button
-                        class="btn link danger"
-                        @click="action('remove-member', m.id)"
-                      >
-                        移除
-                      </button>
+                      <template v-if="manage">
+                        <button
+                          v-if="demo && m.status === 'invited'"
+                          class="btn small"
+                          @click="acceptDemo(m.id)"
+                        >
+                          模拟接受邀请
+                        </button>
+                        <button
+                          v-if="m.status === 'invited'"
+                          class="btn link"
+                          @click="action('resend', m.id)"
+                        >
+                          重新邀请</button
+                        ><button
+                          class="btn small"
+                          @click="action('edit-member', m.id)"
+                        >
+                          设置</button
+                        ><button
+                          class="btn link danger"
+                          @click="action('remove-member', m.id)"
+                        >
+                          移除
+                        </button>
+                      </template>
                     </div>
-                    <span v-else>—</span>
                   </td>
                 </tr>
               </tbody>
@@ -857,6 +849,14 @@ const actionNames: Record<string, string> = {
         本次未发送邮件；链接由你自行交付。
       </p></template
     >
+  </FormDialog>
+  <FormDialog
+    v-if="permissionMember"
+    title="成员权限详情"
+    wide
+    @close="permissionMember = ''"
+  >
+    <PermissionDetails :tenant-id="current" :member-id="permissionMember" />
   </FormDialog>
   <div id="toast" class="toast" role="status" aria-live="polite">
     {{ toast }}

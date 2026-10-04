@@ -236,6 +236,114 @@ const suffix = Date.now().toString(36),
       false,
     );
     checks.push("自有 UI 创建项目并授予 Developer，运营角色无隐式代码权限");
+    await button("角色与权限").click();
+    await page.getByRole("heading", { name: "开发者", exact: true }).waitFor();
+    await button("成员与团队").click();
+    await page
+      .locator("tr")
+      .filter({ hasText: email })
+      .getByRole("button", { name: "查看权限" })
+      .click();
+    await modal().getByText("当前有效：开发者", { exact: true }).waitFor();
+    await button("关闭弹窗", modal()).click();
+    await button("团队").click();
+    await button("创建团队").click();
+    await field("name").fill("研发团队");
+    await modal().locator("[type=submit]").click();
+    await modal().waitFor({ state: "hidden" });
+    s = await sync(tid);
+    const devTeam = s.teams.find((t) => t.name === "研发团队");
+    await page
+      .locator("tr")
+      .filter({ hasText: "研发团队" })
+      .getByRole("button", { name: "查看成员" })
+      .click();
+    await button("添加团队成员").click();
+    await field("member").selectOption(m.id);
+    await modal().locator("[type=submit]").click();
+    await modal().waitFor({ state: "hidden" });
+    await sync(tid);
+    await page.goto(base + "#project/" + p.id + "/members");
+    await button("分配团队角色").click();
+    await field("team").selectOption(devTeam.id);
+    await field("role").selectOption("admin");
+    await modal().locator("[type=submit]").click();
+    await modal().waitFor({ state: "hidden" });
+    await sync(tid);
+    const qaTeam = await change(tid, "POST", "/teams", { name: "质量团队" });
+    await change(tid, "PUT", `/teams/${qaTeam.team_id}/members/${m.id}`);
+    await change(
+      tid,
+      "PUT",
+      `/projects/${p.id}/team-grants/${qaTeam.team_id}`,
+      { role: "reviewer" },
+    );
+    await sync(tid);
+    let report = await api(
+      member,
+      "GET",
+      `/api/v1/tenants/${tid}/permissions/me`,
+    );
+    assert.equal(report.teams.length, 2);
+    assert.equal(report.projects[0].sources.length, 3);
+    assert.equal(report.projects[0].effectiveRole, "admin");
+    assert.equal(
+      (await git("GET", `/projects/${p.gitlab_id}/members/all/${m.gitlab_id}`))
+        .access_level,
+      40,
+    );
+    await memberPage.goto(base + "#my-permissions");
+    await memberPage
+      .getByText("当前有效：项目管理员", { exact: true })
+      .waitFor();
+    await memberPage
+      .getByText("团队 · 研发团队 → 项目管理员", { exact: true })
+      .waitFor();
+    await memberPage.screenshot({
+      path: path.join(evidence, "my-permissions.png"),
+      fullPage: true,
+    });
+    await api(
+      member,
+      "GET",
+      `/api/v1/tenants/${tid}/members/${s.members.find((x) => x.user_id === me.id).id}/permissions`,
+      undefined,
+      404,
+    );
+    await change(tid, "DELETE", `/projects/${p.id}/grants/${m.id}`);
+    report = await api(member, "GET", `/api/v1/tenants/${tid}/permissions/me`);
+    assert.equal(report.projects[0].effectiveRole, "admin");
+    assert.equal(report.projects[0].sources.length, 2);
+    await change(tid, "DELETE", `/teams/${devTeam.id}/members/${m.id}`);
+    assert.equal(
+      (
+        await api(
+          member,
+          "GET",
+          `/api/v1/tenants/${tid}/projects/${p.id}/access`,
+        )
+      ).write,
+      false,
+    );
+    await sync(tid);
+    assert.equal(
+      (await git("GET", `/projects/${p.gitlab_id}/members/all/${m.gitlab_id}`))
+        .access_level,
+      20,
+    );
+    report = await api(member, "GET", `/api/v1/tenants/${tid}/permissions/me`);
+    assert.equal(report.projects[0].sources.length, 1);
+    assert.equal(report.projects[0].sources[0].name, "质量团队");
+    await change(tid, "PUT", `/projects/${p.id}/grants/${m.id}`, {
+      role: "developer",
+    });
+    await sync(tid);
+    checks.push(
+      "真实团队成员 UI、项目团队角色、个人权限与来源展示；成员不可查看他人权限",
+    );
+    checks.push(
+      "双团队与直接角色叠加；撤销单一来源保留其他授权，移出团队立即降权并同步 GitLab",
+    );
     const second = await api(
       admin,
       "POST",

@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { computed, ref, shallowRef } from "vue";
+import { computed, ref, shallowRef, watch, onUnmounted } from "vue";
 import { api, mutate, message } from "../api";
-import type { Field, Grant, Project, Snapshot } from "../types";
+import type { Field, Grant, Project, Snapshot, TeamGrant } from "../types";
 import FormDialog from "./FormDialog.vue";
 const props = defineProps<{ snapshot: Snapshot; project: Project }>();
 const emit = defineEmits<{ changed: [] }>();
@@ -15,6 +15,28 @@ const names: Record<string, string> = {
   admin: "项目管理员",
 };
 const error = ref("");
+const teamGrants = ref<TeamGrant[]>([]);
+let generation = 0;
+watch(
+  () => [props.snapshot, props.project],
+  async () => {
+    const ticket = ++generation;
+    if (!props.project.permissions.manageMembers) {
+      teamGrants.value = [];
+      return;
+    }
+    try {
+      const result = await api<{ items: TeamGrant[] }>(
+        `/api/v1/tenants/${props.snapshot.tenant.id}/projects/${props.project.id}/team-grants`,
+      );
+      if (ticket === generation) teamGrants.value = result.items;
+    } catch (e) {
+      if (ticket === generation) error.value = message(e);
+    }
+  },
+  { immediate: true },
+);
+onUnmounted(() => generation++);
 const dialog = shallowRef<{
   title: string;
   fields: Field[];
@@ -30,7 +52,7 @@ async function edit(g?: Grant) {
       )
     ).items;
     dialog.value = {
-      title: g ? "修改项目角色" : "添加项目成员",
+      title: g ? "修改直接分配角色" : "添加项目成员",
       fields: [
         {
           name: "member",
@@ -48,9 +70,9 @@ async function edit(g?: Grant) {
           name: "role",
           label: "项目角色",
           value:
-            g?.desired_role === "none"
+            g?.direct_role === "none"
               ? "reviewer"
-              : g?.desired_role || "reviewer",
+              : g?.direct_role || "reviewer",
           options: ["reviewer", "developer", "admin"].map((value) => ({
             value,
             label: names[value]!,
@@ -76,10 +98,52 @@ function revoke(g: Grant) {
   const path = `/api/v1/tenants/${props.snapshot.tenant.id}/projects/${props.project.id}/grants/${g.membership_id}`,
     version = props.snapshot.tenant.version;
   dialog.value = {
-    title: "撤销 " + g.name + " 的项目权限",
+    title: "撤销 " + g.name + " 的直接授权",
     fields: [],
     submit: async () => {
       await mutate(path, "DELETE", {}, version);
+      dialog.value = undefined;
+      emit("changed");
+    },
+  };
+}
+function editTeam(t?: TeamGrant, remove = false) {
+  const path = `/api/v1/tenants/${props.snapshot.tenant.id}/projects/${props.project.id}/team-grants`,
+    version = props.snapshot.tenant.version;
+  dialog.value = {
+    title: remove ? "撤销 " + t!.name + " 的团队授权" : "分配团队项目角色",
+    fields: remove
+      ? []
+      : [
+          {
+            name: "team",
+            label: "团队",
+            value: t?.id || "",
+            options: [
+              { value: "", label: "选择团队" },
+              ...teamGrants.value.map((t) => ({
+                value: t.id,
+                label: t.name + " · " + t.member_count + " 位成员",
+              })),
+            ],
+          },
+          {
+            name: "role",
+            label: "项目角色",
+            value: t?.role === "none" ? "reviewer" : t?.role || "reviewer",
+            options: ["reviewer", "developer", "admin"].map((value) => ({
+              value,
+              label: names[value]!,
+            })),
+          },
+        ],
+    submit: async (v) => {
+      await mutate(
+        path + "/" + (remove ? t!.id : v.team),
+        remove ? "DELETE" : "PUT",
+        { role: v.role },
+        version,
+      );
       dialog.value = undefined;
       emit("changed");
     },
@@ -104,7 +168,7 @@ function revoke(g: Grant) {
         <thead>
           <tr>
             <th>成员</th>
-            <th>目标角色</th>
+            <th>目标角色 / 来源</th>
             <th>当前有效角色</th>
             <th>GitLab 同步</th>
             <th>操作</th>
@@ -113,7 +177,16 @@ function revoke(g: Grant) {
         <tbody>
           <tr v-for="g in grants" :key="g.membership_id">
             <td>{{ g.name }}</td>
-            <td>{{ names[g.desired_role] }}</td>
+            <td>
+              {{ names[g.desired_role]
+              }}<span
+                v-for="source in g.sources"
+                :key="source.kind + source.id"
+                class="sub"
+                >{{ source.kind === "team" ? "团队 · " : ""
+                }}{{ source.name }}：{{ names[source.role] }}</span
+              >
+            </td>
             <td>{{ names[g.effective_role] }}</td>
             <td>
               {{ g.desired_level === g.observed_level ? "已核验" : "待同步"
@@ -128,13 +201,16 @@ function revoke(g: Grant) {
                 v-if="project.permissions.manageMembers"
                 class="cell-actions"
               >
-                <button class="btn small" @click="edit(g)">修改角色</button
+                <button class="btn small" @click="edit(g)">
+                  {{
+                    g.direct_role === "none" ? "添加直接授权" : "修改直接角色"
+                  }}</button
                 ><button
-                  v-if="g.desired_role !== 'none'"
+                  v-if="g.direct_role !== 'none'"
                   class="btn link danger"
                   @click="revoke(g)"
                 >
-                  撤销
+                  撤销直接授权
                 </button>
               </div>
               <span v-else>—</span>
@@ -149,6 +225,52 @@ function revoke(g: Grant) {
       确认后生效。降级和撤销立即限制平台能力。租户管理员不自动获得代码权限。
     </div>
   </section>
+  <section
+    v-if="project.permissions.manageMembers"
+    class="panel permission-project"
+  >
+    <div class="panel-head">
+      <h2>团队项目角色</h2>
+      <button class="btn" :disabled="!teamGrants.length" @click="editTeam()">
+        分配团队角色
+      </button>
+    </div>
+    <p class="permission-body muted">
+      团队成员共同获得项目角色。移除团队授权不会影响直接授权或其他团队授权。
+    </p>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>团队</th>
+            <th>成员数</th>
+            <th>角色</th>
+            <th>操作</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr v-for="t in teamGrants" :key="t.id">
+            <td>{{ t.name }}</td>
+            <td>{{ t.member_count }}</td>
+            <td>{{ names[t.role] }}</td>
+            <td>
+              <div class="cell-actions">
+                <button class="btn small" @click="editTeam(t)">分配角色</button
+                ><button
+                  v-if="t.role !== 'none'"
+                  class="btn small danger"
+                  @click="editTeam(t, true)"
+                >
+                  撤销团队授权
+                </button>
+              </div>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <p v-if="!teamGrants.length" class="empty">请先由租户管理员创建团队。</p>
+  </section>
   <FormDialog
     v-if="dialog"
     :key="dialog.title"
@@ -156,5 +278,8 @@ function revoke(g: Grant) {
     :fields="dialog.fields"
     :submit="dialog.submit"
     @close="dialog = undefined"
-  />
+    ><p class="notice">
+      个人有效能力可在“我的权限”查看。修改一条授权后，其他授权来源继续有效。
+    </p></FormDialog
+  >
 </template>

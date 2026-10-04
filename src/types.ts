@@ -21,13 +21,13 @@ export interface Member {
   email: string;
   role: string;
   status: string;
-  team_id: string | null;
-  team_name: string | null;
+  teams: { id: string; name: string }[];
   gitlab_id: number | null;
 }
 export interface Team {
   id: string;
   name: string;
+  member_count: number;
 }
 export interface ProjectPermissions {
   viewProject: boolean;
@@ -50,6 +50,8 @@ export interface Project {
   gitlab_id: number | null;
 }
 export interface Grant {
+  direct_role: string;
+  sources: { kind: string; id: string; name: string; role: string }[];
   desired_role: string;
   observed_role: string;
   effective_role: string;
@@ -234,4 +236,41 @@ export interface TaskDetail {
     created_at: string;
     detail: unknown;
   }[];
+}
+
+export interface RoleDefinition {
+  id: string;
+  scope: string;
+  name: string;
+  permissions: string[];
+  conditions: string[];
+}
+export interface PermissionReport {
+  member: {
+    id: string;
+    user_id: string;
+    name: string;
+    role: string;
+    status: string;
+    user_status: string;
+    tenant_status: string;
+    operator: boolean;
+  };
+  teams: { id: string; name: string }[];
+  tenantPermissions: Snapshot["permissions"];
+  projects: {
+    id: string;
+    name: string;
+    desiredRole: string;
+    effectiveRole: string;
+    permissions: ProjectPermissions;
+    reason: string;
+    sources: { kind: string; id: string; name: string; role: string }[];
+  }[];
+}
+export interface TeamGrant {
+  id: string;
+  name: string;
+  role: string;
+  member_count: number;
 }
