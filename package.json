@@ -9,14 +9,12 @@
     "typecheck": "vue-tsc --noEmit",
     "preview": "vite preview --host 127.0.0.1",
     "test:e2e": "node tests/e2e.cjs",
-    "test:tasks": "node tests/tasks-e2e.cjs",
+    "test:tasks": "node tests/coding-integration.cjs",
     "open": "node scripts/open-console.cjs",
-    "test:tasks-smoke": "node tests/tasks-smoke.cjs",
     "format": "prettier --write src tests scripts/*.cjs *.ts *.json index.html",
     "format:check": "prettier --check src tests scripts/*.cjs *.ts *.json index.html",
     "test:prototype": "node tests/prototype-e2e.cjs",
-    "export:prototype": "npm run build && node scripts/export-prototype.cjs",
-    "test:whole-app": "node tests/whole-app-e2e.cjs"
+    "export:prototype": "npm run build && node scripts/export-prototype.cjs"
   },
   "dependencies": {
     "vue": "3.5.43"

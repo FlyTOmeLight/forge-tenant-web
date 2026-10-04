@@ -6,8 +6,12 @@ export default defineConfig({
   server: {
     port: 8383,
     strictPort: true,
-    proxy: Object.fromEntries(
-      ["/api/", "/auth/", "/internal/"].map((path) => [path, { target }]),
-    ),
+    proxy: {
+      "^/api/v1/(tenants/[^/]+/projects/[^/]+/(tasks|coding-settings)(/|$)|platform/connections$)":
+        { target: process.env.CODING_PROXY_TARGET || "http://127.0.0.1:8485" },
+      ...Object.fromEntries(
+        ["/api/", "/auth/", "/internal/"].map((path) => [path, { target }]),
+      ),
+    },
   },
 });

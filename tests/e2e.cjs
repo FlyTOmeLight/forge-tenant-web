@@ -132,7 +132,7 @@ const suffix = Date.now().toString(36),
         "--kube-context",
         "orbstack",
         "--namespace",
-        process.env.FORGE_NAMESPACE || "forge-tenant",
+        process.env.FORGE_NAMESPACE || "forge-tenant-split",
         "--reuse-values",
         "--set",
         `worker.replicas=${replicas}`,
@@ -623,8 +623,16 @@ const suffix = Date.now().toString(36),
     await mobilePage.close();
     assert.deepEqual(errors, []);
     checks.push("真实控制台桌面与移动端无页面级横向溢出或脚本异常");
-    const eventResponse = await admin.request.get(
+    const blocked = await admin.request.get(
       base + "/internal/v1/access/events?after=0",
+    );
+    assert.equal(blocked.status(), 404);
+    if (!process.env.FORGE_INTERNAL_URL)
+      throw new Error(
+        "FORGE_INTERNAL_URL must point to the tenant backend, separate from the public gateway",
+      );
+    const eventResponse = await admin.request.get(
+      process.env.FORGE_INTERNAL_URL + "/internal/v1/access/events?after=0",
       { headers: { Authorization: "Bearer " + privateConfig.serviceToken } },
     );
     assert.equal(eventResponse.status(), 200);

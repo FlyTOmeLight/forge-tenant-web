@@ -1,6 +1,6 @@
 # Forge 企业控制台
 
-Vue 3 + TypeScript + Vite 实现的独立企业前端，配套后端为 [forge-tenant-api](https://github.com/FlyTOmeLight/forge-tenant-api)。页面由本仓库构建和部署，包含登录、邀请激活、企业、成员与团队、项目权限、同步、审计和代码修复任务。
+Vue 3 + TypeScript + Vite 实现的独立企业前端，租户后端为 [forge-tenant-api](https://github.com/FlyTOmeLight/forge-tenant-api)，研发后端为 [forge-coding-api](https://github.com/FlyTOmeLight/forge-coding-api)。页面由本仓库构建和部署，包含登录、邀请激活、企业、成员与团队、项目权限、同步、审计和代码修复任务。
 
 ## 开发
 
@@ -12,7 +12,7 @@ npm run dev
 npm run build
 ```
 
-开发服务固定使用 `http://127.0.0.1:8383`，API 代理默认 `http://127.0.0.1:8484`，可通过 `API_PROXY_TARGET` 修改。后端 `PUBLIC_URL` 和 OIDC 回调必须与浏览器入口一致。运行 Vite 前释放已占用的 8383 端口；将后端 Service 转发至 8484：
+开发服务固定使用 `http://127.0.0.1:8383`，API 代理默认 `http://127.0.0.1:8484`，可通过 `API_PROXY_TARGET` 修改；研发接口代理使用 `CODING_PROXY_TARGET`，默认 http://127.0.0.1:8485。后端 `PUBLIC_URL` 和 OIDC 回调必须与浏览器入口一致。运行 Vite 前释放已占用的 8383 端口；将后端 Service 转发至 8484：
 
 ```sh
 kubectl --context orbstack -n forge-tenant port-forward service/forge-tenant 8484:80
@@ -31,7 +31,7 @@ kubectl --context orbstack -n forge-tenant port-forward service/forge-tenant-web
 
 Chart：`charts/forge-tenant-web`。默认上游为 `http://forge-tenant`；分 namespace 时通过 `api.upstream` 指定后端 Service DNS。镜像必须可被集群获取，OrbStack 可直接使用本机 Docker 镜像。远程集群设置可访问的 `image.repository` 与不可变版本号。
 
-前端 Nginx 提供静态页面，并转发 `/api/`、`/auth/`、`/internal/` 到后端。这样前后端可独立构建、发布、扩缩容，浏览器会话仍保持同源，使用 HttpOnly Cookie 与 CSRF 校验。前端不持有 GitLab 管理令牌、OIDC client secret 或服务端密钥。公开部署启用前端 Chart 的 TLS Ingress，后端 `PUBLIC_URL` 同步配置为该 HTTPS origin。
+前端 Nginx 将任务、执行配置和接入状态请求转发到 `coding.upstream`（默认 http://forge-coding），其他 `/api/` 和 `/auth/` 转发到租户后端。公共 `/internal/` 路径返回 404。这样前后端可独立构建、发布、扩缩容，浏览器会话仍保持同源，使用 HttpOnly Cookie 与 CSRF 校验。前端不持有 GitLab 管理令牌、OIDC client secret 或服务端密钥。公开部署启用前端 Chart 的 TLS Ingress，后端 `PUBLIC_URL` 同步配置为该 HTTPS origin。
 
 ## 目录
 
@@ -54,19 +54,19 @@ tests/             真实环境端到端测试
 npm run build
 npm audit --audit-level=high
 helm lint charts/forge-tenant-web
-LAB_CONFIG=/path/to/lab/infra.json npm run test:e2e
-LAB_CONFIG=/path/to/lab/infra.json npm run test:tasks-smoke
+FORGE_NAMESPACE=forge-tenant-split FORGE_INTERNAL_URL=http://127.0.0.1:18484 LAB_CONFIG=/path/to/lab/infra.json npm run test:e2e
+FORGE_CODING_PILOT=/path/to/pilot.json npm run test:tasks
 ```
 
 E2E 默认从兄弟仓库 `../forge-tenant-api/.local/deployment.json` 读取测试配置，支持 `FORGE_CONFIG` 覆盖。暂停并恢复 Worker 的检查从 `FORGE_API_ROOT`（默认兄弟后端仓库）读取后端 Chart。测试会创建独立租户、用户和项目，并修改测试授权。结果与截图放 `.local/`，不提交凭证或登录会话。
 
-`npm run test:tasks` 为现有真实执行器试点验收，会启动/停止任务、调用模型并更新试点 MR，需提供 `TASK_PILOT_CONFIG`。本次拆分的验证范围和结果见 [docs/verification.md](docs/verification.md)。
+`npm run test:tasks` 通过真实模型修复专用测试项目并创建 Draft MR，需要 `FORGE_CODING_PILOT` 指向包含 tenant_id、project_id 和 model 的测试配置。项目必须预置 src/calc.py 的零计数错误与 src/test_calc.py，且已配置独立工具环境。内部撤权事件验收使用 FORGE_INTERNAL_URL 指向租户后端本机端口转发，不经过公共网关。本次拆分的验证范围和结果见 [docs/verification.md](docs/verification.md)。
 
 ## 依赖选择
 
 Vue 提供组件与响应式表单，Vite 负责 SFC 编译和生产打包；TypeScript / vue-tsc 验证模板和接口类型。均使用官方 npm 包、锁定版本，Vue/Vite 采用 MIT 许可证。Playwright 只用于开发验证。没有引入 Casdoor 前端或 UI SDK。
 
-任务 smoke 使用上述 E2E 创建的测试项目，验证 MR 关联、审查和停止确认协议，不运行模型；完整试点测试单独执行。代码格式由 `npm run format` 统一，CI 执行 `npm run format:check`。
+旧的 claim 协议验收脚本已移除；新的任务验收调用 Agentic Kit。代码格式由 `npm run format` 统一，CI 执行 `npm run format:check`。
 
 ## 本次独立验证环境
 
@@ -78,7 +78,7 @@ Vue 提供组件与响应式表单，Vite 负责 SFC 编译和生产打包；Typ
 kubectl --context orbstack -n forge-tenant-split port-forward service/forge-tenant-web 8483:80
 ```
 
-后续功能已迁入：项目执行配置与接入检查、直接新建问题任务、多审查者、每轮配置快照、Agent 判断、代码差异，以及统一导航下的三种任务布局。真实模型完整交付验收作为下一步单独执行。
+后续功能已迁入：项目执行配置与接入检查、直接新建问题任务、多审查者、每轮配置快照、Agent 判断、代码差异，以及统一导航下的三种任务布局。研发业务现已迁到独立 forge-coding-api，真实模型交付结果见该仓库的验证记录。
 
 ## 任务工作台与原型
 
@@ -95,7 +95,7 @@ npm run export:prototype
 FORGE_PROTOTYPE_URL="file://$PWD/dist/forge-prototype.html" npm run test:prototype
 ```
 
-`npm run test:whole-app` 为真实模型修复试点，要求 `FORGE_CONFIG`、`FORGE_TASK_PILOT` 指向后端私有配置，项目中已部署对应执行器。它会修改 GitLab 试点项目，迁移回归不运行该命令。
+真实研发链路使用 `npm run test:tasks`，会修改配置明确指定的试点仓库。
 
 ## 角色、团队与权限查询
 

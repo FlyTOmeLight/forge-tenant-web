@@ -230,7 +230,7 @@ async function create(projectID?: string) {
     }
     const selectedProject = projectID,
       path = base(projectID),
-      { settings, branches, executors } = await api<SettingsResponse>(
+      { settings, branches } = await api<SettingsResponse>(
         path + "/coding-settings",
       );
     if (!settings.checkedAt) {
@@ -252,7 +252,7 @@ async function create(projectID?: string) {
     form({
       title: "新建修复任务",
       reviewers: true,
-      text: `配置 v${settings.version} · ${executors.length} 个在线执行器 · 最多 ${settings.repairLimit} 次修复 / ${settings.timeoutMinutes} 分钟。产生有效修改后创建 Draft MR。`,
+      text: `配置 v${settings.version} · Agentic Kit 执行 · 最多 ${settings.repairLimit} 次修复 / ${settings.timeoutMinutes} 分钟。产生有效修改后创建 Draft MR。`,
       submitLabel: "创建并加入队列",
       fields: [
         field("title", "任务名称"),
@@ -735,7 +735,7 @@ void refresh();
         <p class="notice">
           配置 v{{ config.settings.version }} ·
           {{ config.settings.checkedAt ? "接入已检查" : "等待配置或重新检查" }}
-          · {{ config.executors.length }} 个在线执行器
+          · Agentic Kit 执行
         </p>
         <dl class="config-grid">
           <dt>基准分支</dt>

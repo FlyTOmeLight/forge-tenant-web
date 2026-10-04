@@ -13,3 +13,6 @@ ingress:
   className: ""
   host: ""
   tlsSecret: ""
+
+coding:
+  upstream: http://forge-coding
