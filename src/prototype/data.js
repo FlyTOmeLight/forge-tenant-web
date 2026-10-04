@@ -2,7 +2,7 @@ import { TaskFlow } from "./state.js";
 /* Explicit local prototype transport. Live mode never uses these records. */
 export function createPrototype() {
   "use strict";
-  const key = "forge-vue-prototype-v1",
+  const key = "forge-vue-prototype-v2",
     now = () => new Date().toISOString();
   const users = [
     {
@@ -27,6 +27,13 @@ export function createPrototype() {
       roleLabel: "开发者",
     },
   ];
+  users.push({
+    id: "u-platform",
+    name: "平台运营员",
+    email: "platform@example.test",
+    operator: true,
+    roleLabel: "仅平台管理员",
+  });
   function seed() {
     const tenant = {
       id: "demo-tenant",
@@ -38,7 +45,7 @@ export function createPrototype() {
       member_count: 3,
       project_count: 3,
     };
-    const members = users.map((u, i) => ({
+    const members = users.slice(0, 3).map((u, i) => ({
       id: "m-" + i,
       user_id: u.id,
       name: u.name,
@@ -263,6 +270,34 @@ export function createPrototype() {
     write: level(pid) >= 30,
     manage: level(pid) >= 40,
   });
+  const tenantAdmin = (tid) =>
+    db.members.some(
+      (m) =>
+        m.tenant_id === tid &&
+        m.user_id === user().id &&
+        m.status === "active" &&
+        m.role === "admin",
+    );
+  function projectPermissions(pid) {
+    const tid = db.projects.find((p) => p.id === pid)?.tenant_id,
+      a = access(pid),
+      active = tenant(tid)?.status === "active";
+    return {
+      viewProject: tenantAdmin(tid) || a.read,
+      readCode: a.read,
+      createTask: a.write,
+      manageMembers: active && (tenantAdmin(tid) || a.manage),
+      configureExecution: a.manage,
+    };
+  }
+  const roleName = (level) =>
+    level >= 40
+      ? "admin"
+      : level >= 30
+        ? "developer"
+        : level >= 20
+          ? "reviewer"
+          : "none";
   const person = (name) => users.find((u) => u.name === name)?.id || name;
   const cap = (s) => s[0].toUpperCase() + s.slice(1);
   function task(r) {
@@ -442,30 +477,63 @@ export function createPrototype() {
         { name: "pilot/injected-storagepath" },
       ],
       executors: [{ worker_id: "原型模拟执行器", last_seen: now() }],
-      canManage: access(pid).manage,
+      permissions: projectPermissions(pid),
+      models: access(pid).manage ? ["qwen3.8:27b-mlx", "deepseek-coder"] : [],
     };
   }
   function snapshot(id) {
-    const t = tenant(id);
-    if (!t) throw Error("企业不存在。");
-    const belongs = (x) => x.tenant_id === id;
+    const t = tenant(id),
+      admin = tenantAdmin(id);
+    if (
+      !t ||
+      !db.members.some(
+        (m) =>
+          m.tenant_id === id &&
+          m.user_id === user().id &&
+          m.status === "active",
+      ) ||
+      (!admin && t.status !== "active")
+    )
+      throw Error("租户不存在或无访问权限。");
+    const active = t.status === "active",
+      belongs = (x) => x.tenant_id === id;
     return {
       tenant: t,
-      can_manage:
-        user().operator ||
-        db.members.some(
-          (m) =>
-            belongs(m) &&
-            m.user_id === user().id &&
-            m.role === "admin" &&
-            m.status === "active",
-        ),
-      members: db.members.filter(belongs),
-      teams: db.teams.filter(belongs),
-      projects: db.projects.filter(belongs),
-      grants: db.grants.filter(belongs),
-      operations: db.operations.filter(belongs),
-      audit: db.audit.filter(belongs),
+      permissions: {
+        viewSettings: admin,
+        manageMembers: admin && active,
+        manageProjects: admin && active,
+        viewAudit: admin,
+        viewSync: admin,
+      },
+      members: db.members.filter(
+        (m) => belongs(m) && (admin || m.user_id === user().id),
+      ),
+      teams: admin ? db.teams.filter(belongs) : [],
+      projects: db.projects
+        .filter((p) => belongs(p) && projectPermissions(p.id).viewProject)
+        .map((p) => ({ ...p, permissions: projectPermissions(p.id) })),
+      grants: db.grants
+        .filter(
+          (g) =>
+            belongs(g) &&
+            (admin ||
+              access(g.project_id).manage ||
+              db.members.find((m) => m.id === g.membership_id)?.user_id ===
+                user().id),
+        )
+        .map((g) => ({
+          ...g,
+          desired_role: roleName(g.desired_level),
+          observed_role: roleName(g.observed_level),
+          effective_role: roleName(
+            active
+              ? Math.min(g.desired_level, g.observed_level, g.effective_level)
+              : 0,
+          ),
+        })),
+      operations: admin ? db.operations.filter(belongs) : [],
+      audit: admin ? db.audit.filter(belongs) : [],
     };
   }
   const connections = () => ({
@@ -486,30 +554,45 @@ export function createPrototype() {
       parts = path.split("/").filter(Boolean);
     let result;
     if (path === "/api/v1/me")
-      return { user: user(), csrf_token: "explicit-demo-token" };
-    if (path === "/api/v1/coding/connections") return connections();
-    if (path === "/api/v1/connection")
       return {
-        connected: true,
-        version: "19.4.1",
-        url: "原型演示环境",
-        organization: "星河科技",
+        user: user(),
+        csrf_token: "explicit-demo-token",
+        permissions: { managePlatform: user().operator },
       };
+    if (path.startsWith("/api/v1/platform/")) {
+      if (!user().operator) throw Error("需要平台管理权限。");
+      if (path === "/api/v1/platform/connections") return connections();
+      if (path === "/api/v1/platform/users") return { items: users };
+      if (path === "/api/v1/platform/tenants" && method === "GET")
+        return { items: db.tenants };
+      if (parts[3] === "tenants" && parts[4] && method === "PATCH") {
+        const t = tenant(parts[4]);
+        if (!t) throw Error("租户不存在");
+        t.status = b.status;
+        if (b.status === "suspended")
+          db.tasks
+            .filter((r) => r.tenant_id === t.id)
+            .forEach((r) => apply(r, { type: "revoke" }));
+        t.version++;
+        save();
+        return { tenant_id: t.id };
+      }
+    }
     if (path === "/api/v1/tenants" && method === "GET")
       return {
-        items: db.tenants.filter(
-          (t) =>
-            user().operator ||
-            db.members.some(
-              (m) =>
-                m.tenant_id === t.id &&
-                m.user_id === user().id &&
-                m.status === "active",
-            ),
+        items: db.tenants.filter((t) =>
+          db.members.some(
+            (m) =>
+              m.tenant_id === t.id &&
+              m.user_id === user().id &&
+              m.status === "active",
+          ),
         ),
       };
-    if (path === "/api/v1/tenants" && method === "POST") {
+    if (path === "/api/v1/platform/tenants" && method === "POST") {
       if (!user().operator) throw Error("需要平台运营权限。");
+      const admin = users.find((u) => u.id === b.admin_user_id);
+      if (!admin) throw Error("请选择首位租户管理员。");
       const id = "t-" + crypto.randomUUID();
       db.tenants.push({
         id,
@@ -524,9 +607,9 @@ export function createPrototype() {
       db.members.push({
         id: "m-" + crypto.randomUUID(),
         tenant_id: id,
-        user_id: user().id,
-        name: user().name,
-        email: user().email,
+        user_id: admin.id,
+        name: admin.name,
+        email: admin.email,
         role: "admin",
         status: "active",
         gitlab_id: 1,
@@ -536,13 +619,30 @@ export function createPrototype() {
     }
     if (parts[2] !== "tenants") throw Error("原型暂未提供此操作。");
     const tid = parts[3];
-    if (parts.length === 4 && method === "GET") return snapshot(tid);
+    const tenantSnapshot = snapshot(tid);
+    if (parts.length === 4 && method === "GET") return tenantSnapshot;
     if (parts[4] === "projects" && parts[5]) {
       const pid = parts[5],
         a = access(pid);
       if (!a.read && !["grants", "grant-candidates"].includes(parts[6]))
         throw Error("没有项目访问权限。");
       if (parts[6] === "access") return a;
+      if (parts[6] === "people")
+        return {
+          items: db.members
+            .filter(
+              (m) =>
+                m.tenant_id === tid &&
+                m.status === "active" &&
+                level(pid, m.user_id) >= 20,
+            )
+            .map((m) => ({
+              id: m.user_id,
+              name: m.name,
+              canReview: true,
+              canOwn: level(pid, m.user_id) >= 30,
+            })),
+        };
       if (parts[6] === "coding-settings") {
         if (method === "GET") return settings(pid);
         if (!a.manage) throw Error("需要项目管理员权限。");
@@ -660,14 +760,16 @@ export function createPrototype() {
             owner: users.find((u) => u.id === b.ownerId)?.name,
           });
         }
-      } else if (parts[6] === "grant-candidates")
+      } else if (parts[6] === "grant-candidates") {
+        if (!projectPermissions(pid).manageMembers)
+          throw Error("需要项目成员管理权限。");
         return {
           items: db.members.filter(
             (m) => m.tenant_id === tid && m.status === "active",
           ),
         };
-      else if (parts[6] === "grants") {
-        if (!snapshot(tid).can_manage && !a.manage)
+      } else if (parts[6] === "grants") {
+        if (!snapshot(tid).permissions.manageMembers && !a.manage)
           throw Error("需要项目或企业管理员权限。");
         const mid = parts[7],
           v =
@@ -696,15 +798,9 @@ export function createPrototype() {
         result = { message: "原型项目授权已更新" };
       }
     } else {
-      if (!snapshot(tid).can_manage) throw Error("需要企业管理员权限。");
-      if (parts.length === 4 && method === "PATCH") {
-        Object.assign(tenant(tid), b);
-        if (b.status === "suspended")
-          db.tasks
-            .filter((r) => r.tenant_id === tid)
-            .forEach((r) => apply(r, { type: "revoke" }));
-        result = { message: "企业状态已更新" };
-      } else if (parts[4] === "teams") {
+      if (!snapshot(tid).permissions.manageMembers)
+        throw Error("需要企业管理员权限。");
+      if (parts[4] === "teams") {
         db.teams.push({
           tenant_id: tid,
           id: "team-" + crypto.randomUUID(),

@@ -72,7 +72,7 @@ Vue 提供组件与响应式表单，Vite 负责 SFC 编译和生产打包；Typ
 
 为保留另一会话对原平台的并行修改，本轮使用 namespace `forge-tenant-split`、独立 PostgreSQL 和 OIDC client `forge-tenant-split-console`，浏览器入口为 `http://127.0.0.1:8483`。该环境中的企业和项目是验收数据；原 `forge-tenant` / 8383 及其数据未被切换或覆盖。
 
-继续更新此验证环境时使用 `FORGE_NAMESPACE=forge-tenant-split FORGE_IMAGE_TAG=0.3.0-migration ./scripts/deploy-lab.sh`。前端 E2E 同时设置 `FORGE_NAMESPACE=forge-tenant-split`。本机端口转发命令：
+继续更新此验证环境时使用 `FORGE_NAMESPACE=forge-tenant-split FORGE_IMAGE_TAG=0.4.1-permissions ./scripts/deploy-lab.sh`。前端 E2E 同时设置 `FORGE_NAMESPACE=forge-tenant-split`。本机端口转发命令：
 
 ```sh
 kubectl --context orbstack -n forge-tenant-split port-forward service/forge-tenant-web 8483:80
@@ -82,7 +82,11 @@ kubectl --context orbstack -n forge-tenant-split port-forward service/forge-tena
 
 ## 任务工作台与原型
 
-`/#tasks`、`/#reviews`、`/#spaces`、`/#project/<project-id>` 与 `/#connections` 共用企业上下文和导航。任务详情支持概览、代码差异与补丁下载、评论、检查/模型判断/人工认可、轮次配置及活动记录。
+工作区导航为“我的任务”“待我审查”“项目”。“我的任务”只显示本人负责的任务；项目内可查看该项目全部任务。租户管理员额外看到成员与团队、权限同步、审计记录。平台管理入口独立，切换后隐藏租户选择器。
+
+项目详情按 `/#project/<project-id>/tasks`、`/members`、`/execution` 分为任务、成员与权限、执行配置。平台入口为 `/#platform/tenants` 和 `/#platform/connections`。创建租户必须明确指定首位租户管理员，平台管理员不会自动加入租户。
+
+后端返回命名权限，菜单、按钮和直接链接据此限制访问。租户管理员不自动获得项目代码权限；项目管理员可管理该项目成员，不能操作租户设置。审查者与负责人从项目协作名单选择。任务详情支持概览、代码差异与补丁下载、评论、检查/模型判断/人工认可、轮次配置及活动记录。
 
 `/prototype.html` 使用同一 Vue 页面和显式本地传输层，提供角色切换、接受邀请、状态事件模拟和重置；不会调用真实 API。`npm run export:prototype` 输出 `dist/forge-prototype.html`，可以离线打开。
 

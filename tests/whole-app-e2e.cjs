@@ -41,7 +41,7 @@ fs.mkdirSync(dir, { recursive: true });
     await page.locator("#tenant-switch").selectOption(pilot.tenantId);
     await page.goto(base + "#tasks");
     await page
-      .getByRole("heading", { name: "任务工作台", exact: true })
+      .getByRole("heading", { name: "我的任务", exact: true })
       .waitFor();
     async function api(method, path, body) {
       const m = await (await ctx.request.get(base + "/api/v1/me")).json(),
@@ -56,7 +56,7 @@ fs.mkdirSync(dir, { recursive: true });
     }
     const root =
       "/api/v1/tenants/" + pilot.tenantId + "/projects/" + pilot.projectId;
-    await page.goto(base + "#project/" + pilot.projectId);
+    await page.goto(base + "#project/" + pilot.projectId + "/execution");
     await page
       .getByRole("heading", { name: /agentic-kit 试点.*执行配置/ })
       .waitFor();

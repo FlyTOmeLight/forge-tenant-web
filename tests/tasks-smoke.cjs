@@ -38,7 +38,7 @@ const root = path.resolve(__dirname, ".."),
     await p.locator("#password").fill(cfg.adminPassword);
     await p.locator("#submit").click();
     await p.waitForURL((u) => u.pathname === "/");
-    await p.getByRole("heading", { name: "企业管理", exact: true }).waitFor();
+    await p.getByRole("heading", { name: "我的任务", exact: true }).waitFor();
     const me = await (await ctx.request.get(base + "/api/v1/me")).json();
     async function api(method, url, body, headers = {}) {
       const r = await ctx.request.fetch(base + url, {
@@ -118,7 +118,7 @@ const root = path.resolve(__dirname, ".."),
     );
     const settingsPath = `/api/v1/tenants/${tid}/projects/${project.id}/coding-settings`;
     const settings = (await api("GET", settingsPath)).settings;
-    const models = (await api("GET", "/api/v1/coding/connections")).model
+    const models = (await api("GET", "/api/v1/platform/connections")).model
       .models;
     assert.ok(
       models.length,
@@ -240,7 +240,7 @@ const root = path.resolve(__dirname, ".."),
         });
     }
     // Direct creation produces a queued round and no empty MR.
-    await p.goto(base + "/#project/" + project.id);
+    await p.goto(base + "/#project/" + project.id + "/execution");
     await p.getByRole("button", { name: "新建修复任务", exact: true }).click();
     for (const [name, value] of Object.entries({
       title: "New problem migration check",

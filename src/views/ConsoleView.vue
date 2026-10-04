@@ -1,58 +1,58 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, shallowRef, watch } from "vue";
 import { api, mutate, message, setCSRF } from "../api";
-import type {
-  User,
-  Tenant,
-  Snapshot,
-  Project,
-  Grant,
-  Field,
-  Mutation,
-  Member,
-} from "../types";
+import type { User, Tenant, Snapshot, Field, Mutation } from "../types";
 import StatusBadge from "../components/StatusBadge.vue";
 import FormDialog from "../components/FormDialog.vue";
+import PlatformView from "./PlatformView.vue";
 import CodingWorkspace from "./CodingWorkspace.vue";
 import { demo } from "../prototype";
 const navs = [
-  ["tasks", "任务工作台"],
+  ["tasks", "我的任务"],
   ["reviews", "待我审查"],
-  ["spaces", "项目空间"],
-  ["connections", "服务连接"],
-  ["tenants", "企业管理"],
+  ["spaces", "项目"],
   ["members", "成员与团队"],
-  ["projects", "项目与权限"],
-  ["sync", "接入与同步"],
+  ["sync", "权限同步"],
   ["audit", "审计记录"],
+  ["platform/tenants", "租户管理"],
+  ["platform/connections", "全局服务连接"],
 ];
-const roleNames: Record<number, string> = {
-  0: "无权限",
-  20: "审查者",
-  30: "开发者",
-  40: "项目管理员",
-};
-const remoteNames: Record<number, string> = {
-  0: "无权限",
-  20: "Reporter · 20",
-  30: "Developer · 30",
-  40: "Maintainer · 40",
-};
+const platformPermissions = ref({ managePlatform: false });
+const platformMode = computed(() => view.value.startsWith("platform/"));
+const workspaceNavs = computed(() => navs.slice(0, 3));
+const settingsNavs = computed(() =>
+  navs
+    .slice(3, 6)
+    .filter(([id]) =>
+      id === "members"
+        ? data.value?.permissions.viewSettings
+        : id === "sync"
+          ? data.value?.permissions.viewSync
+          : data.value?.permissions.viewAudit,
+    ),
+);
+const visibleNavs = computed(() =>
+  platformMode.value
+    ? platformPermissions.value.managePlatform
+      ? navs.slice(6)
+      : []
+    : [...workspaceNavs.value, ...settingsNavs.value],
+);
+const allowedView = computed(() =>
+  platformMode.value
+    ? platformPermissions.value.managePlatform
+    : visibleNavs.value.some(([id]) => id === view.value) ||
+      /^(task|project)\//.test(view.value),
+);
 const companyRoles = [
   { value: "member", label: "普通成员" },
   { value: "admin", label: "企业管理员" },
-];
-const projectRoles = [
-  { value: "developer", label: "开发者 · Developer" },
-  { value: "reviewer", label: "审查者 · Reporter" },
-  { value: "admin", label: "项目管理员 · Maintainer" },
 ];
 const user = ref<User>(),
   tenants = ref<Tenant[]>([]),
   data = ref<Snapshot>(),
   current = ref(sessionStorage.getItem("forge-tenant") || "");
-const defaultView =
-  demo || location.pathname === "/tasks" ? "tasks" : "tenants";
+const defaultView = "tasks";
 const view = ref(location.hash.slice(1) || defaultView),
   query = ref(""),
   tab = ref("members"),
@@ -67,14 +67,12 @@ function refreshAll() {
   refreshVersion.value++;
   void refresh();
 }
-const manage = computed(() => !!data.value?.can_manage);
+const manage = computed(() => !!data.value?.permissions.manageMembers);
 const tenant = computed(() => data.value?.tenant);
-const members = computed(() => data.value?.members || []),
-  projects = computed(() => data.value?.projects || []),
-  grants = computed(() => data.value?.grants || []);
+const members = computed(() => data.value?.members || []);
 const operations = computed(() => data.value?.operations || []);
 const coding = computed(() =>
-  ["tasks", "reviews", "spaces", "connections", "task", "project"].includes(
+  ["tasks", "reviews", "spaces", "task", "project"].includes(
     view.value.split("/")[0]!,
   ),
 );
@@ -89,14 +87,8 @@ const heading = computed(
 );
 const matches = (...values: unknown[]) =>
   values.join(" ").toLowerCase().includes(query.value.toLowerCase());
-const filteredTenants = computed(() =>
-  tenants.value.filter((t) => matches(t.name, t.slug)),
-);
 const filteredMembers = computed(() =>
   members.value.filter((m) => matches(m.name, m.email, m.team_name)),
-);
-const filteredProjects = computed(() =>
-  projects.value.filter((p) => matches(p.name, p.path)),
 );
 const filteredAudit = computed(() =>
   (data.value?.audit || []).filter((a) =>
@@ -109,23 +101,32 @@ function notify(value: string) {
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => (toast.value = ""), 5000);
 }
+let refreshGeneration = 0;
 async function refresh() {
-  if (loading.value) return;
+  const ticket = ++refreshGeneration;
   loading.value = true;
   try {
-    tenants.value = (await api<{ items: Tenant[] }>("/api/v1/tenants")).items;
-    if (!tenants.value.some((t) => t.id === current.value))
-      current.value = tenants.value[0]?.id || "";
-    data.value = current.value
+    const items = (await api<{ items: Tenant[] }>("/api/v1/tenants")).items;
+    if (ticket !== refreshGeneration) return;
+    tenants.value = items;
+    if (!items.some((t) => t.id === current.value)) {
+      current.value = items[0]?.id || "";
+      data.value = undefined;
+    }
+    const snapshot = current.value
       ? await api<Snapshot>("/api/v1/tenants/" + current.value)
       : undefined;
+    if (ticket !== refreshGeneration) return;
+    data.value = snapshot;
     sessionStorage.setItem("forge-tenant", current.value);
     status.value = "最近刷新 " + new Date().toLocaleTimeString("zh-CN");
   } catch (e) {
+    if (ticket !== refreshGeneration) return;
+    data.value = undefined;
     status.value = message(e);
     notify(message(e));
   } finally {
-    loading.value = false;
+    if (ticket === refreshGeneration) loading.value = false;
   }
 }
 function navigate(value: string) {
@@ -135,8 +136,9 @@ function navigate(value: string) {
   sidebar.value = false;
 }
 async function enter(id: string) {
+  data.value = undefined;
   current.value = id;
-  navigate("members");
+  navigate("tasks");
   await refresh();
 }
 function hashChanged() {
@@ -148,37 +150,6 @@ function hashChanged() {
   query.value = "";
 }
 watch(heading, (v) => (document.title = "Forge · " + v));
-function localLevel(g: Grant) {
-  return tenant.value?.status === "active" && g.member_status === "active"
-    ? Math.min(g.desired_level, g.observed_level, g.effective_level)
-    : 0;
-}
-function projectManage(p: Project) {
-  const self = members.value.find((m) => m.user_id === user.value?.id);
-  return (
-    manage.value ||
-    grants.value.some(
-      (g) =>
-        g.project_id === p.id &&
-        g.membership_id === self?.id &&
-        localLevel(g) >= 40,
-    )
-  );
-}
-const projectGrants = (id: string) =>
-  grants.value.filter((g) => g.project_id === id);
-function projectStatus(p: Project) {
-  if (!p.gitlab_id) return "等待项目接入";
-  return projectGrants(p.id).some(
-    (g) =>
-      g.observed_level !==
-      (tenant.value?.status === "active" && g.member_status === "active"
-        ? g.desired_level
-        : 0),
-  )
-    ? "权限待确认"
-    : "最近核验一致";
-}
 interface Dialog {
   key: number;
   title: string;
@@ -188,8 +159,6 @@ interface Dialog {
   submit?: (values: Record<string, string>) => Promise<void>;
   wide?: boolean;
   invitation?: string;
-  project?: Project;
-  connection?: Record<string, unknown>;
 }
 const dialog = shallowRef<Dialog>();
 let dialogKey = 0;
@@ -243,50 +212,6 @@ function action(kind: string, id = "") {
     version = tenant.value?.version || 0;
   const update = (tail: string, method: string, body: unknown = {}) =>
     change(tail, method, body, tid, version);
-  if (kind === "create-tenant")
-    edit(
-      "创建企业",
-      "你将成为首位管理员。代码访问需单独授予。",
-      [
-        { name: "name", label: "企业名称" },
-        {
-          name: "slug",
-          label: "企业标识",
-          help: "2–40 位小写字母、数字或连字符；创建后不可修改。",
-        },
-      ],
-      "创建企业",
-      async (values) => {
-        const result = await mutate<Mutation>(
-          "/api/v1/tenants",
-          "POST",
-          values,
-        );
-        current.value = result.tenant_id!;
-        navigate("members");
-        return result;
-      },
-    );
-  if (kind === "tenant-state") {
-    const t = tenants.value.find((t) => t.id === id)!;
-    const active = t.status === "active";
-    edit(
-      (active ? "停用" : "启用") + " " + t.name,
-      active
-        ? "立即撤销平台访问资格，并同步撤销企业内受管 GitLab 项目授权。保留统一账号和其他企业关系。"
-        : "重新同步目标授权，不自动恢复 Agent 任务。",
-      [],
-      active ? "确认停用" : "确认启用",
-      () =>
-        change(
-          "",
-          "PATCH",
-          { status: active ? "suspended" : "active" },
-          t.id,
-          t.version,
-        ),
-    );
-  }
   if (kind === "invite")
     edit(
       "邀请企业成员",
@@ -376,16 +301,6 @@ function action(kind: string, id = "") {
       "接入项目",
       (values) => update("/projects", "POST", values),
     );
-  if (kind === "revoke") {
-    const [pid, mid] = id.split(":");
-    edit(
-      "撤销项目权限？",
-      "立即限制平台访问，GitLab 有效权限核验结果单独记录。",
-      [],
-      "确认撤销",
-      () => update(`/projects/${pid}/grants/${mid}`, "DELETE"),
-    );
-  }
   if (kind === "retry")
     edit(
       "重试当前目标？",
@@ -394,65 +309,6 @@ function action(kind: string, id = "") {
       "提交重试",
       () => update(`/operations/${id}/retry`, "POST"),
     );
-}
-async function permissions(p: Project) {
-  const tid = current.value,
-    version = tenant.value!.version,
-    editable = projectManage(p);
-  try {
-    const candidates = editable
-      ? (
-          await api<{ items: Member[] }>(
-            `/api/v1/tenants/${tid}/projects/${p.id}/grant-candidates`,
-          )
-        ).items
-      : [];
-    const fields: Field[] = editable
-      ? [
-          {
-            name: "member",
-            label: "企业成员",
-            options: [
-              { value: "", label: "请选择已接受邀请的成员" },
-              ...candidates.map((m) => ({
-                value: m.id,
-                label: m.name + " · " + m.email,
-              })),
-            ],
-          },
-          { name: "role", label: "项目角色", options: projectRoles },
-        ]
-      : [];
-    if (editable)
-      edit(
-        p.name + " · 项目权限",
-        "新增权限等待 GitLab 确认。降级或撤销先限制平台能力。",
-        fields,
-        "保存项目授权",
-        (values) =>
-          change(
-            `/projects/${p.id}/grants/${values.member}`,
-            "PUT",
-            { role: values.role },
-            tid,
-            version,
-          ),
-        { wide: true, project: p },
-      );
-    else show({ title: p.name + " · 项目权限", wide: true, project: p });
-  } catch (e) {
-    notify(message(e));
-  }
-}
-async function connection() {
-  try {
-    show({
-      title: "GitLab 接入检查",
-      connection: await api<Record<string, unknown>>("/api/v1/connection"),
-    });
-  } catch (e) {
-    notify(message(e));
-  }
 }
 async function copyInvitation() {
   try {
@@ -476,8 +332,13 @@ onMounted(async () => {
   hashChanged();
   window.addEventListener("hashchange", hashChanged);
   try {
-    const info = await api<{ user: User; csrf_token: string }>("/api/v1/me");
+    const info = await api<{
+      user: User;
+      csrf_token: string;
+      permissions: { managePlatform: boolean };
+    }>("/api/v1/me");
     user.value = info.user;
+    platformPermissions.value = info.permissions;
     setCSRF(info.csrf_token);
     await refresh();
   } catch (e) {
@@ -486,6 +347,7 @@ onMounted(async () => {
   poll = setInterval(() => {
     if (
       user.value &&
+      !loading.value &&
       !document.hidden &&
       !dialog.value &&
       document.activeElement?.id !== "search"
@@ -494,14 +356,23 @@ onMounted(async () => {
   }, 5000);
 });
 onUnmounted(() => {
+  refreshGeneration++;
   clearInterval(poll);
   clearTimeout(toastTimer);
   window.removeEventListener("hashchange", hashChanged);
 });
 async function switchDemo(id: string) {
+  refreshGeneration++;
+  data.value = undefined;
+  tenants.value = [];
   demo?.setUser(id);
-  const info = await api<{ user: User; csrf_token: string }>("/api/v1/me");
+  const info = await api<{
+    user: User;
+    csrf_token: string;
+    permissions: { managePlatform: boolean };
+  }>("/api/v1/me");
   user.value = info.user;
+  platformPermissions.value = info.permissions;
   await refresh();
 }
 async function acceptDemo(id: string) {
@@ -544,45 +415,67 @@ const actionNames: Record<string, string> = {
     aria-label="管理导航"
   >
     <div class="brand"><span class="mark" aria-hidden="true">F</span>Forge</div>
-    <label class="switch-label" for="tenant-switch">当前企业</label
-    ><select
-      id="tenant-switch"
-      v-model="current"
-      class="tenant-switch"
-      aria-label="当前企业"
-      :disabled="!!dialog || loading"
-      @change="
-        query = '';
-        refresh();
-      "
-    >
-      <option v-if="!tenants.length" value="">尚无企业</option>
-      <option v-for="t in tenants" :key="t.id" :value="t.id">
-        {{ t.name }}
-      </option>
-    </select>
-    <div class="nav-label">研发与组织</div>
-    <nav id="nav">
-      <button
-        v-for="[id, label] in navs"
-        :key="id"
-        class="nav"
-        :class="{ active: view === id }"
-        :aria-current="view === id ? 'page' : undefined"
-        @click="navigate(id!)"
+    <template v-if="!platformMode"
+      ><label class="switch-label" for="tenant-switch">当前租户</label
+      ><select
+        id="tenant-switch"
+        v-model="current"
+        class="tenant-switch"
+        aria-label="当前企业"
+        :disabled="!!dialog || loading"
+        @change="
+          query = '';
+          data = undefined;
+          refresh();
+        "
       >
-        {{ label
-        }}<span
-          v-if="
-            id === 'sync' &&
-            operations.some((o) => ['failed', 'conflict'].includes(o.status))
-          "
-          class="count"
-          >!</span
+        <option v-if="!tenants.length" value="">尚无企业</option>
+        <option v-for="t in tenants" :key="t.id" :value="t.id">
+          {{ t.name }}
+        </option>
+      </select>
+    </template>
+    <div class="nav-label">{{ platformMode ? "平台管理" : "研发工作" }}</div>
+    <nav id="nav">
+      <template v-for="[id, label] in visibleNavs" :key="id">
+        <div v-if="id === 'members'" class="nav-label tenant-settings-label">
+          租户设置
+        </div>
+        <button
+          class="nav"
+          :class="{
+            active:
+              view === id || (id === 'spaces' && view.startsWith('project/')),
+          }"
+          :aria-current="view === id ? 'page' : undefined"
+          @click="navigate(id!)"
         >
-      </button>
+          {{ label
+          }}<span
+            v-if="
+              id === 'sync' &&
+              operations.some((o) => ['failed', 'conflict'].includes(o.status))
+            "
+            class="count"
+            >!</span
+          >
+        </button>
+      </template>
     </nav>
     <div class="side-bottom">
+      <button
+        v-if="platformPermissions.managePlatform && !platformMode"
+        class="nav platform-entry"
+        @click="navigate('platform/tenants')"
+      >
+        平台管理 ↗</button
+      ><button
+        v-if="platformMode"
+        class="nav platform-entry"
+        @click="navigate('tasks')"
+      >
+        ← 返回工作区
+      </button>
       <div class="operator">
         <span id="avatar" class="avatar">{{
           user?.name.slice(0, 1) || "F"
@@ -590,7 +483,13 @@ const actionNames: Record<string, string> = {
         <div>
           <span id="operator-name">{{ user?.name }}</span>
           <div id="operator-role" class="muted small-text">
-            {{ user?.operator ? "平台运营管理员" : "企业账号" }}
+            {{
+              platformMode
+                ? "平台管理员"
+                : data?.permissions.viewSettings
+                  ? "当前租户管理员"
+                  : "租户成员"
+            }}
           </div>
         </div>
       </div>
@@ -613,7 +512,8 @@ const actionNames: Record<string, string> = {
           ☰
         </button>
         <div class="breadcrumb">
-          Forge 控制台 / <strong id="crumb">{{ heading }}</strong>
+          {{ platformMode ? "平台管理" : tenant?.name || "工作区" }} /
+          <strong id="crumb">{{ heading }}</strong>
         </div>
       </div>
       <div class="top-links">
@@ -649,7 +549,7 @@ const actionNames: Record<string, string> = {
       tabindex="-1"
       :aria-busy="loading"
     >
-      <div v-if="!coding" class="heading">
+      <div v-if="!coding && !platformMode && allowedView" class="heading">
         <div>
           <h1>{{ heading }}</h1>
           <p class="subtitle">
@@ -661,40 +561,34 @@ const actionNames: Record<string, string> = {
           </p>
         </div>
         <button
-          v-if="view === 'tenants' && user?.operator"
-          class="btn primary"
-          @click="action('create-tenant')"
-        >
-          创建企业</button
-        ><button
           v-if="view === 'members' && manage"
           class="btn primary"
           @click="action('invite')"
         >
-          邀请成员</button
-        ><button
-          v-if="view === 'projects' && manage"
-          class="btn primary"
-          @click="action('add-project')"
-        >
-          接入项目</button
-        ><button
-          v-if="view === 'sync' && user?.operator"
-          class="btn"
-          @click="connection"
-        >
-          检查接入
+          邀请成员
         </button>
       </div>
       <div
-        v-if="view !== 'tenants' && tenant?.status === 'suspended'"
+        v-if="!platformMode && tenant?.status === 'suspended'"
         class="notice danger"
       >
         企业已停用，平台访问资格已撤销；GitLab 撤权结果见同步记录。
       </div>
-      <div v-if="view !== 'tenants' && !data" class="empty">
+      <div v-if="!allowedView" class="empty">
+        <h2>你没有此页面的访问权限</h2>
+        <button class="btn" @click="navigate('tasks')">返回工作台</button>
+      </div>
+      <PlatformView
+        v-else-if="platformMode"
+        :view="view"
+        :workspaces="tenants"
+        :refresh-version="refreshVersion"
+        @enter="enter"
+        @changed="refresh"
+      />
+      <div v-else-if="!data" class="empty">
         <h3>尚未加入企业</h3>
-        <p>请创建企业，或接受管理员发来的邀请。</p>
+        <p>请接受租户管理员发来的邀请。平台管理员可从独立入口管理租户。</p>
       </div>
       <CodingWorkspace
         v-else-if="coding && data && user"
@@ -705,72 +599,8 @@ const actionNames: Record<string, string> = {
         :view="view"
         @navigate="navigate"
         @add-project="action('add-project')"
+        @changed="refresh"
       />
-      <section v-else-if="view === 'tenants'" class="panel">
-        <div class="toolbar">
-          <input
-            id="search"
-            v-model="query"
-            class="search"
-            type="search"
-            aria-label="搜索企业名称或标识"
-            placeholder="搜索企业名称或标识"
-          />
-        </div>
-        <div v-if="filteredTenants.length" class="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>企业 / 标识</th>
-                <th>成员 / 项目</th>
-                <th>状态</th>
-                <th>GitLab 同步</th>
-                <th>操作</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-for="t in filteredTenants" :key="t.id">
-                <td>
-                  <span class="name">{{ t.name }}</span
-                  ><span class="sub mono">{{ t.slug }}</span>
-                </td>
-                <td>
-                  {{ t.member_count }} 位成员<span class="sub"
-                    >{{ t.project_count }} 个项目</span
-                  >
-                </td>
-                <td><StatusBadge :status="t.status" /></td>
-                <td><StatusBadge :status="t.sync_status" /></td>
-                <td>
-                  <div class="cell-actions">
-                    <button
-                      class="btn link"
-                      :disabled="loading"
-                      @click="enter(t.id)"
-                    >
-                      进入企业</button
-                    ><button
-                      v-if="user?.operator"
-                      class="btn small"
-                      :class="{ danger: t.status === 'active' }"
-                      @click="action('tenant-state', t.id)"
-                    >
-                      {{ t.status === "active" ? "停用" : "启用" }}
-                    </button>
-                  </div>
-                </td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-        <div v-else class="empty">
-          <h3>还没有匹配的企业空间</h3>
-          <p>创建企业并邀请成员，或调整搜索条件。</p>
-        </div>
-        <div class="footnote">
-          统一账号可以加入多个企业。企业管理员默认不获得代码访问权。
-        </div>
-      </section>
       <template v-else-if="view === 'members'"
         ><div v-if="manage" class="tabs">
           <button
@@ -905,73 +735,10 @@ const actionNames: Record<string, string> = {
           </div>
         </section>
       </template>
-      <section v-else-if="view === 'projects'" class="panel">
-        <div class="toolbar">
-          <input
-            id="search"
-            v-model="query"
-            type="search"
-            class="search"
-            aria-label="搜索项目名称或路径"
-            placeholder="搜索项目名称或路径"
-          />
-        </div>
-        <div v-if="filteredProjects.length" class="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>项目 / GitLab 路径</th>
-                <th>目标授权</th>
-                <th>同步情况</th>
-                <th>操作</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-for="p in filteredProjects" :key="p.id">
-                <td>
-                  <span class="name">{{ p.name }}</span
-                  ><span class="sub mono">{{ p.path }}</span>
-                </td>
-                <td>
-                  {{
-                    projectGrants(p.id).filter((g) => g.desired_level > 0)
-                      .length
-                  }}
-                  位成员
-                </td>
-                <td>
-                  <span
-                    class="badge"
-                    :class="
-                      projectStatus(p) === '最近核验一致' ? 'good' : 'warn'
-                    "
-                    >{{ projectStatus(p) }}</span
-                  >
-                </td>
-                <td>
-                  <button class="btn link" @click="permissions(p)">
-                    {{ projectManage(p) ? "管理权限" : "查看权限" }}
-                  </button>
-                </td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-        <div v-else class="empty">
-          <h3>还没有可访问的项目</h3>
-          <p>
-            {{
-              manage
-                ? "接入企业项目，再授予成员权限。"
-                : "请联系企业或项目管理员授予项目权限。"
-            }}
-          </p>
-        </div>
-        <div class="footnote">
-          项目管理员 → Maintainer；开发者 → Developer；审查者 → Reporter。
-        </div>
-      </section>
-      <section v-else-if="view === 'sync' && manage" class="panel">
+      <section
+        v-else-if="view === 'sync' && data?.permissions.viewSync"
+        class="panel"
+      >
         <div class="panel-head">
           <h2>同步操作</h2>
           <span class="muted">当前目标版本 {{ tenant?.version }}</span>
@@ -1022,7 +789,10 @@ const actionNames: Record<string, string> = {
           每 5 分钟核对成功版本；冲突需处理后重试。旧版本不会覆盖新目标。
         </div>
       </section>
-      <section v-else-if="view === 'audit' && manage" class="panel">
+      <section
+        v-else-if="view === 'audit' && data?.permissions.viewAudit"
+        class="panel"
+      >
         <div class="toolbar">
           <input
             id="search"
@@ -1085,66 +855,6 @@ const actionNames: Record<string, string> = {
       </button>
       <p class="muted space-top">
         本次未发送邮件；链接由你自行交付。
-      </p></template
-    >
-    <div v-if="dialog.project" class="table-wrap">
-      <table class="grants">
-        <thead>
-          <tr>
-            <th>成员</th>
-            <th>目标角色</th>
-            <th>GitLab 已确认</th>
-            <th>平台当前能力</th>
-            <th>操作</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr
-            v-for="g in projectGrants(dialog.project.id)"
-            :key="g.membership_id"
-          >
-            <td>{{ g.name }}</td>
-            <td>{{ roleNames[g.desired_level] }}</td>
-            <td>
-              {{ remoteNames[g.observed_level] || g.observed_level
-              }}<span class="sub">{{
-                g.checked_at ? date(g.checked_at) : "尚未核验"
-              }}</span>
-            </td>
-            <td>{{ roleNames[localLevel(g)] }}</td>
-            <td>
-              <button
-                v-if="projectManage(dialog.project) && g.desired_level"
-                type="button"
-                class="btn link danger"
-                @click="action('revoke', g.project_id + ':' + g.membership_id)"
-              >
-                撤销
-              </button>
-            </td>
-          </tr>
-          <tr v-if="!projectGrants(dialog.project.id).length">
-            <td colspan="5">尚无项目授权</td>
-          </tr>
-        </tbody>
-      </table>
-    </div>
-    <template v-if="dialog.connection"
-      ><dl v-if="dialog.connection.connected" class="facts">
-        <dt>连接</dt>
-        <dd>可用</dd>
-        <dt>版本</dt>
-        <dd>
-          {{ dialog.connection.version }}
-          {{ dialog.connection.enterprise ? "EE" : "CE" }}
-        </dd>
-        <dt>服务地址</dt>
-        <dd>{{ dialog.connection.url }}</dd>
-        <dt>身份组织</dt>
-        <dd>{{ dialog.connection.organization }}</dd>
-      </dl>
-      <p v-else class="notice danger">
-        {{ dialog.connection.error }}
       </p></template
     >
   </FormDialog>

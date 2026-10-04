@@ -2,7 +2,7 @@
 import { computed, onMounted, onUnmounted, ref, shallowRef, watch } from "vue";
 import { api, message } from "../api";
 import { demo } from "../prototype";
-import type { Member, TaskDetail, Field } from "../types";
+import type { Member, ProjectPerson, TaskDetail, Field } from "../types";
 import FormDialog from "../components/FormDialog.vue";
 import StatusBadge from "../components/StatusBadge.vue";
 const props = defineProps<{
@@ -14,6 +14,7 @@ const props = defineProps<{
 }>();
 const emit = defineEmits<{ navigate: [path: string] }>();
 const detail = ref<TaskDetail>();
+const people = ref<ProjectPerson[]>([]);
 const tab = ref("overview"),
   status = ref("正在读取项目授权…"),
   toast = ref(""),
@@ -104,7 +105,14 @@ async function refresh() {
         "当前企业没有可访问的代码项目。企业角色不会自动授予代码权限。";
       return;
     }
-    detail.value = await api<TaskDetail>(path() + "/" + props.taskId);
+    const [d, p] = await Promise.all([
+      api<TaskDetail>(path() + "/" + props.taskId),
+      api<{ items: ProjectPerson[] }>(
+        `/api/v1/tenants/${props.tenantId}/projects/${props.projectId}/people`,
+      ),
+    ]);
+    detail.value = d;
+    people.value = p.items;
     status.value = "数据已更新 · " + new Date().toLocaleTimeString("zh-CN");
   } catch (e) {
     status.value = message(e);
@@ -171,9 +179,9 @@ function action(kind: string) {
     fields.push({
       name: "ownerId",
       label: "新负责人",
-      options: props.members
-        .filter((m) => m.status === "active")
-        .map((m) => ({ value: m.user_id, label: m.name })),
+      options: people.value
+        .filter((p) => p.canOwn)
+        .map((p) => ({ value: p.id, label: p.name })),
     });
   show(
     labels[kind] || kind,
@@ -607,17 +615,14 @@ const eventNames: Record<string, string> = {
             <dt>负责人</dt>
             <dd>
               {{
-                members.find((m) => m.user_id === task?.ownerId)?.name ||
-                task.ownerId
+                people.find((m) => m.id === task?.ownerId)?.name || task.ownerId
               }}
             </dd>
             <dt>审查者</dt>
             <dd>
               {{
                 task.reviewerIds
-                  .map(
-                    (id) => members.find((m) => m.user_id === id)?.name || id,
-                  )
+                  .map((id) => people.find((m) => m.id === id)?.name || id)
                   .join("、")
               }}
             </dd>
@@ -634,7 +639,10 @@ const eventNames: Record<string, string> = {
               }}
             </dd>
           </dl>
-          <button class="btn" @click="emit('navigate', 'project/' + projectId)">
+          <button
+            class="btn"
+            @click="emit('navigate', 'project/' + projectId + '/execution')"
+          >
             项目执行配置
           </button>
           <div class="task-links">

@@ -29,13 +29,30 @@ export interface Team {
   id: string;
   name: string;
 }
+export interface ProjectPermissions {
+  viewProject: boolean;
+  readCode: boolean;
+  createTask: boolean;
+  manageMembers: boolean;
+  configureExecution: boolean;
+}
+export interface ProjectPerson {
+  id: string;
+  name: string;
+  canReview: boolean;
+  canOwn: boolean;
+}
 export interface Project {
+  permissions: ProjectPermissions;
   id: string;
   name: string;
   path: string;
   gitlab_id: number | null;
 }
 export interface Grant {
+  desired_role: string;
+  observed_role: string;
+  effective_role: string;
   project_id: string;
   membership_id: string;
   name: string;
@@ -66,7 +83,13 @@ export interface Audit {
 }
 export interface Snapshot {
   tenant: Tenant;
-  can_manage: boolean;
+  permissions: {
+    manageMembers: boolean;
+    manageProjects: boolean;
+    viewSettings: boolean;
+    viewAudit: boolean;
+    viewSync: boolean;
+  };
   members: Member[];
   teams: Team[];
   projects: Project[];
@@ -122,7 +145,8 @@ export interface SettingsResponse {
   settings: CodingSettings;
   branches: { name: string }[];
   executors: { worker_id: string; last_seen: string }[];
-  canManage: boolean;
+  permissions: ProjectPermissions;
+  models: string[];
 }
 export interface Connections {
   gitlab: { status: string; url?: string };

@@ -87,9 +87,16 @@ const suffix = Date.now().toString(36),
   }
   async function change(tid, method, tail, body = {}, expected = 202) {
     const current = await snap(tid);
-    return api(admin, method, `/api/v1/tenants/${tid}${tail}`, body, expected, {
-      "If-Match": String(current.tenant.version),
-    });
+    return api(
+      admin,
+      method,
+      `${method === "PATCH" && !tail ? "/api/v1/platform/tenants" : "/api/v1/tenants"}/${tid}${tail}`,
+      body,
+      expected,
+      {
+        "If-Match": String(current.tenant.version),
+      },
+    );
   }
   async function sync(tid, want = "succeeded") {
     const end = Date.now() + 90000;
@@ -140,14 +147,23 @@ const suffix = Date.now().toString(36),
   try {
     await login(page, privateConfig.adminUsername, privateConfig.adminPassword);
     checks.push("真实 OIDC 授权码、PKCE 和服务端会话登录");
-    await button("创建企业").first().click();
+    const me = (await api(admin, "GET", "/api/v1/me")).user;
+    await button("平台管理 ↗").click();
+    await button("创建租户").click();
     await field("name").fill("Forge 研发示例");
     await field("slug").fill("forge-a-" + suffix);
-    await button("创建企业", modal()).click();
+    await field("admin_user_id").selectOption(me.id);
+    await button("创建租户", modal()).click();
     await modal().waitFor({ state: "hidden" });
     const tenants = (await api(admin, "GET", "/api/v1/tenants")).items;
     const tid = tenants.find((t) => t.slug === "forge-a-" + suffix).id;
     await sync(tid);
+    await page
+      .locator("tr")
+      .filter({ hasText: "forge-a-" + suffix })
+      .getByRole("button", { name: "进入工作区" })
+      .click();
+    await button("成员与团队").click();
     await button("邀请成员").click();
     await field("name").fill("联调工程师");
     await field("email").fill(email);
@@ -176,7 +192,7 @@ const suffix = Date.now().toString(36),
       { token: new URL(invitation).hash.slice(1) },
       410,
     );
-    await page.goto(base + "#projects");
+    await page.goto(base + "#spaces");
     await page.reload();
     await button("接入项目").first().click();
     await field("name").fill("订单服务");
@@ -187,10 +203,11 @@ const suffix = Date.now().toString(36),
     const p = s.projects[0];
     assert.ok(p.gitlab_id);
     await button("刷新数据").click();
-    await button("管理权限").click();
+    await page.goto(base + "#project/" + p.id + "/members");
+    await button("添加项目成员").click();
     await field("member").selectOption(m.id);
     await field("role").selectOption("developer");
-    await button("保存项目授权", modal()).click();
+    await modal().locator("[type=submit]").click();
     await modal().waitFor({ state: "hidden" });
     await sync(tid);
     assert.equal(
@@ -222,8 +239,12 @@ const suffix = Date.now().toString(36),
     const second = await api(
       admin,
       "POST",
-      "/api/v1/tenants",
-      { name: "跨企业协作示例", slug: "forge-b-" + suffix },
+      "/api/v1/platform/tenants",
+      {
+        name: "跨企业协作示例",
+        slug: "forge-b-" + suffix,
+        admin_user_id: me.id,
+      },
       202,
     );
     const tid2 = second.tenant_id;
@@ -427,10 +448,13 @@ const suffix = Date.now().toString(36),
       409,
       headers,
     );
-    const csrfResponse = await admin.request.post(base + "/api/v1/tenants", {
-      data: { name: "bad", slug: "bad" },
-      headers: { Origin: "https://untrusted.test" },
-    });
+    const csrfResponse = await admin.request.post(
+      base + "/api/v1/platform/tenants",
+      {
+        data: { name: "bad", slug: "bad" },
+        headers: { Origin: "https://untrusted.test" },
+      },
+    );
     assert.equal(csrfResponse.status(), 403);
     checks.push("真实服务重复请求复用结果；请求内容冲突与 CSRF 被拒绝");
     const gitlabContext = await browser.newContext({ ignoreHTTPSErrors: true });

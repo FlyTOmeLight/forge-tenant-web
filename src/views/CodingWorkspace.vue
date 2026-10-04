@@ -3,10 +3,9 @@ import { computed, onUnmounted, ref, shallowRef, watch } from "vue";
 import { api, message } from "../api";
 import { demo } from "../prototype";
 import type {
-  Access,
-  Connections,
   Field,
   Project,
+  ProjectPerson,
   SettingsResponse,
   Snapshot,
   Task,
@@ -14,6 +13,7 @@ import type {
 } from "../types";
 import FormDialog from "../components/FormDialog.vue";
 import StatusBadge from "../components/StatusBadge.vue";
+import ProjectMembers from "../components/ProjectMembers.vue";
 import TaskDetailView from "./TaskDetailView.vue";
 const props = defineProps<{
   snapshot: Snapshot;
@@ -21,12 +21,16 @@ const props = defineProps<{
   view: string;
   refreshVersion: number;
 }>();
-const emit = defineEmits<{ navigate: [path: string]; addProject: [] }>();
-type CodeProject = Project & { access: Access };
+const emit = defineEmits<{
+  navigate: [path: string];
+  addProject: [];
+  changed: [];
+}>();
+type CodeProject = Project;
 const projects = ref<CodeProject[]>([]),
   tasks = ref<Task[]>([]),
   config = ref<SettingsResponse>(),
-  connections = ref<Connections>();
+  people = ref<ProjectPerson[]>([]);
 const busy = ref(false),
   error = ref(""),
   notice = ref(""),
@@ -38,9 +42,25 @@ const layout = ref(localStorage.getItem("forge-layout") || "A"),
 watch(layout, (value) => localStorage.setItem("forge-layout", value));
 const tid = computed(() => props.snapshot.tenant.id);
 const pid = computed(() => props.view.split("/")[1] || "");
+const projectView = computed(() => props.view.startsWith("project/"));
+const currentProject = computed(() =>
+  props.snapshot.projects.find((p) => p.id === pid.value),
+);
+const projectTab = computed(
+  () =>
+    props.view.split("/")[2] ||
+    (currentProject.value?.permissions.readCode ? "tasks" : "members"),
+);
+const taskListing = computed(
+  () =>
+    ["tasks", "reviews"].includes(props.view) ||
+    (projectView.value &&
+      projectTab.value === "tasks" &&
+      currentProject.value?.permissions.readCode),
+);
 const taskRoute = computed(() => props.view.split("/"));
 const writeProjects = computed(() =>
-  projects.value.filter((p) => p.access.write),
+  projects.value.filter((p) => p.permissions.createTask),
 );
 const owner = (id: string) =>
   props.snapshot.members.find((m) => m.user_id === id)?.name || id;
@@ -50,6 +70,7 @@ const ended = (t: Task) =>
   ["Completed", "Canceled", "Undelivered"].includes(t.status);
 const filtered = computed(() =>
   tasks.value.filter((t) => {
+    if (props.view === "tasks" && t.ownerId !== props.user.id) return false;
     if (
       props.view === "reviews" &&
       (!t.reviewerIds.includes(props.user.id) ||
@@ -57,7 +78,13 @@ const filtered = computed(() =>
         t.approvalHead === t.head)
     )
       return false;
-    if (scope.value !== "all" && t.projectId !== scope.value) return false;
+    if (projectView.value && t.projectId !== pid.value) return false;
+    if (
+      !projectView.value &&
+      scope.value !== "all" &&
+      t.projectId !== scope.value
+    )
+      return false;
     if (
       !`${t.title} ${t.id} ${projectName(t.projectId)}`
         .toLowerCase()
@@ -65,11 +92,9 @@ const filtered = computed(() =>
     )
       return false;
     return (
+      projectView.value ||
+      props.view === "reviews" ||
       filter.value === "all" ||
-      (filter.value === "mine" && t.ownerId === props.user.id) ||
-      (filter.value === "review" &&
-        t.reviewerIds.includes(props.user.id) &&
-        !ended(t)) ||
       (filter.value === "running" &&
         ["Queued", "Running"].includes(t.status)) ||
       (filter.value === "attention" &&
@@ -100,39 +125,42 @@ async function refresh() {
   busy.value = true;
   error.value = "";
   try {
-    const all = await Promise.all(
-      props.snapshot.projects.map(async (p) => ({
-        ...p,
-        access: await api<Access>(base(p.id) + "/access"),
-      })),
-    );
-    const readable = all.filter((p) => p.access.read);
+    const all = props.snapshot.projects;
+    const readable = all.filter((p) => p.permissions.readCode);
     let loaded: Task[] = [];
-    let settings: SettingsResponse | undefined,
-      connected: Connections | undefined;
-    if (["tasks", "reviews", "spaces"].includes(props.view))
+    let settings: SettingsResponse | undefined;
+    let projectPeople: ProjectPerson[] = [];
+    if (
+      ["tasks", "reviews", "spaces"].includes(props.view) ||
+      taskListing.value
+    )
       loaded = (
         await Promise.all(
-          readable.map(
-            async (p) =>
-              (await api<{ items: Task[] }>(base(p.id) + "/tasks")).items,
-          ),
+          readable
+            .filter((p) => !projectView.value || p.id === pid.value)
+            .map(
+              async (p) =>
+                (await api<{ items: Task[] }>(base(p.id) + "/tasks")).items,
+            ),
         )
       )
         .flat()
         .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
-    if (props.view.startsWith("project/"))
-      [settings, connected] = await Promise.all([
-        api<SettingsResponse>(base(pid.value) + "/coding-settings"),
-        api<Connections>("/api/v1/coding/connections"),
-      ]);
-    if (props.view === "connections")
-      connected = await api<Connections>("/api/v1/coding/connections");
+    if (projectView.value && currentProject.value?.permissions.readCode) {
+      if (projectTab.value === "execution")
+        settings = await api<SettingsResponse>(
+          base(pid.value) + "/coding-settings",
+        );
+      if (projectTab.value === "members")
+        projectPeople = (
+          await api<{ items: ProjectPerson[] }>(base(pid.value) + "/people")
+        ).items;
+    }
     if (ticket !== generation) return;
-    projects.value = readable;
+    projects.value = all;
     tasks.value = loaded;
     config.value = settings;
-    connections.value = connected;
+    people.value = projectPeople;
   } catch (e) {
     if (ticket === generation) error.value = message(e);
   } finally {
@@ -207,23 +235,14 @@ async function create(projectID?: string) {
       );
     if (!settings.checkedAt) {
       notice.value = "请先保存项目执行配置并检查接入。";
-      emit("navigate", "project/" + projectID);
+      emit("navigate", "project/" + projectID + "/execution");
       return;
     }
-    const eligible = new Set(
-      props.snapshot.grants
-        .filter(
-          (g) =>
-            g.project_id === projectID &&
-            g.member_status === "active" &&
-            Math.min(g.desired_level, g.observed_level, g.effective_level) >=
-              20,
-        )
-        .map((g) => g.membership_id),
-    );
-    reviewerCandidates.value = props.snapshot.members
-      .filter((m) => eligible.has(m.id))
-      .map((m) => ({ id: m.user_id, name: m.name }));
+    reviewerCandidates.value = (
+      await api<{ items: ProjectPerson[] }>(path + "/people")
+    ).items
+      .filter((p) => p.canReview)
+      .map((p) => ({ id: p.id, name: p.name }));
     reviewers.value = reviewerCandidates.value.some(
       (m) => m.id === props.user.id,
     )
@@ -321,10 +340,7 @@ function editConfig() {
   const s = response.settings,
     path = base(pid.value);
   const models = [
-    ...new Set([
-      ...(connections.value?.model.models || []),
-      ...(s.model ? [s.model] : []),
-    ]),
+    ...new Set([...(response.models || []), ...(s.model ? [s.model] : [])]),
   ];
   form({
     title: "编辑项目执行配置",
@@ -407,6 +423,44 @@ void refresh();
   <div class="coding-workspace" :aria-busy="busy">
     <p v-if="error" class="notice danger" role="alert">{{ error }}</p>
     <p v-if="notice" class="notice" role="status">{{ notice }}</p>
+    <template v-if="projectView && currentProject"
+      ><button class="btn link" @click="emit('navigate', 'spaces')">
+        返回项目
+      </button>
+      <div class="task-heading">
+        <div>
+          <h1>{{ currentProject.name }}</h1>
+          <p class="muted">{{ currentProject.path }}</p>
+        </div>
+      </div>
+      <nav class="tabs project-tabs" aria-label="项目导航">
+        <button
+          v-if="currentProject.permissions.readCode"
+          class="tab"
+          :class="{ active: projectTab === 'tasks' }"
+          @click="emit('navigate', 'project/' + pid + '/tasks')"
+        >
+          任务</button
+        ><button
+          v-if="
+            currentProject.permissions.manageMembers ||
+            currentProject.permissions.readCode
+          "
+          class="tab"
+          :class="{ active: projectTab === 'members' }"
+          @click="emit('navigate', 'project/' + pid + '/members')"
+        >
+          成员与权限</button
+        ><button
+          v-if="currentProject.permissions.readCode"
+          class="tab"
+          :class="{ active: projectTab === 'execution' }"
+          @click="emit('navigate', 'project/' + pid + '/execution')"
+        >
+          执行配置
+        </button>
+      </nav></template
+    >
     <TaskDetailView
       v-if="view.startsWith('task/') && taskRoute[1] === tid"
       :key="view"
@@ -420,24 +474,39 @@ void refresh();
     <p v-else-if="view.startsWith('task/')" class="notice">
       该任务不属于当前企业，请在对应企业打开。
     </p>
-    <template v-else-if="view === 'tasks' || view === 'reviews'">
+    <template v-else-if="taskListing">
       <div class="task-heading">
         <div>
-          <h1>{{ view === "reviews" ? "待我审查" : "任务工作台" }}</h1>
+          <h1>
+            {{
+              view === "reviews"
+                ? "待我审查"
+                : projectView
+                  ? "项目任务"
+                  : "我的任务"
+            }}
+          </h1>
           <p class="muted">
             从问题描述到代码交付，跟进每轮执行、检查与人工审查。
           </p>
         </div>
         <button
-          v-if="writeProjects.length && !demo"
+          v-if="
+            writeProjects.length &&
+            !demo &&
+            (!projectView || currentProject?.permissions.createTask)
+          "
           class="btn"
           @click="associate"
         >
           关联修复任务</button
         ><button
-          v-if="writeProjects.length"
+          v-if="
+            writeProjects.length &&
+            (!projectView || currentProject?.permissions.createTask)
+          "
           class="btn primary"
-          @click="create()"
+          @click="create(projectView ? pid : undefined)"
         >
           新建修复任务
         </button>
@@ -478,15 +547,17 @@ void refresh();
             type="search"
             aria-label="搜索修复任务"
             placeholder="搜索任务或项目"
-          /><select v-model="scope" aria-label="筛选项目">
+          /><select v-if="!projectView" v-model="scope" aria-label="筛选项目">
             <option value="all">全部项目</option>
             <option v-for="p in projects" :key="p.id" :value="p.id">
               {{ p.name }}
             </option></select
-          ><select v-model="filter" aria-label="筛选任务">
-            <option value="all">全部任务</option>
-            <option value="mine">我的任务</option>
-            <option value="review">我参与审查</option>
+          ><select
+            v-if="view === 'tasks'"
+            v-model="filter"
+            aria-label="筛选任务"
+          >
+            <option value="all">全部状态</option>
             <option value="running">执行中</option>
             <option value="attention">需要关注</option>
           </select>
@@ -601,11 +672,11 @@ void refresh();
     <template v-else-if="view === 'spaces'"
       ><div class="task-heading">
         <div>
-          <h1>项目空间</h1>
+          <h1>项目</h1>
           <p class="muted">项目代码权限决定任务与配置的可见范围。</p>
         </div>
         <button
-          v-if="snapshot.can_manage"
+          v-if="snapshot.permissions.manageProjects"
           class="btn primary"
           @click="emit('addProject')"
         >
@@ -620,23 +691,17 @@ void refresh();
             {{ tasks.filter((t) => t.projectId === p.id && !ended(t)).length }}
             项未完成任务 ·
             {{
-              p.access.manage
+              p.permissions.configureExecution
                 ? "项目管理员"
-                : p.access.write
+                : p.permissions.createTask
                   ? "开发者"
-                  : "审查者"
+                  : p.permissions.readCode
+                    ? "审查者"
+                    : "仅管理成员"
             }}
           </p>
           <button class="btn" @click="emit('navigate', 'project/' + p.id)">
-            执行配置</button
-          ><button
-            class="btn"
-            @click="
-              scope = p.id;
-              emit('navigate', 'tasks');
-            "
-          >
-            查看任务
+            进入项目
           </button>
         </article>
       </div>
@@ -644,17 +709,21 @@ void refresh();
         当前企业没有可访问的代码项目。
       </p></template
     >
-    <template v-else-if="view.startsWith('project/') && config"
+    <template v-else-if="projectView && projectTab === 'execution' && config"
       ><div class="task-heading">
         <div>
           <h1>{{ projectName(pid) }} · 执行配置</h1>
           <p class="muted">每轮任务使用开始时的配置快照。</p>
         </div>
         <div class="row">
-          <button v-if="config.canManage" class="btn" @click="editConfig">
+          <button
+            v-if="config.permissions.configureExecution"
+            class="btn"
+            @click="editConfig"
+          >
             编辑执行配置</button
           ><button
-            v-if="config.canManage"
+            v-if="config.permissions.configureExecution"
             class="btn primary"
             @click="checkConfig"
           >
@@ -690,7 +759,7 @@ void refresh();
           </dd>
         </dl>
         <button
-          v-if="projects.find((p) => p.id === pid)?.access.write"
+          v-if="projects.find((p) => p.id === pid)?.permissions.createTask"
           class="btn"
           @click="create(pid)"
         >
@@ -698,27 +767,29 @@ void refresh();
         </button>
       </section></template
     >
-    <template v-else-if="view === 'connections'"
-      ><h1>服务连接</h1>
-      <p class="muted">凭据由服务端管理；身份状态表示当前登录已接入。</p>
-      <div v-if="connections" class="coding-projects">
-        <article class="panel coding-project">
-          <h2>GitLab CE</h2>
-          <p>{{ connections.gitlab.status }}</p>
-          <p>{{ connections.gitlab.url }}</p>
-        </article>
-        <article class="panel coding-project">
-          <h2>模型服务</h2>
-          <p>{{ connections.model.status }}</p>
-          <p>{{ connections.model.models?.join("、") || "未发现模型" }}</p>
-        </article>
-        <article class="panel coding-project">
-          <h2>统一身份</h2>
-          <p>{{ connections.identity.status }}</p>
-          <p>{{ connections.identity.organization }}</p>
-        </article>
-      </div></template
+    <template
+      v-else-if="projectView && projectTab === 'members' && currentProject"
     >
+      <ProjectMembers
+        v-if="currentProject.permissions.manageMembers"
+        :snapshot="snapshot"
+        :project="currentProject"
+        @changed="emit('changed')"
+      />
+      <section
+        v-else-if="currentProject.permissions.readCode"
+        class="panel coding-project"
+      >
+        <h2>项目成员</h2>
+        <p v-for="person in people" :key="person.id">
+          {{ person.name }} ·
+          {{ person.canOwn ? "可负责修复任务" : "可参与审查" }}
+        </p>
+      </section>
+    </template>
+    <p v-else-if="projectView && !busy" class="empty">
+      你没有此项目页面的访问权限。
+    </p>
   </div>
   <FormDialog
     v-if="dialog"

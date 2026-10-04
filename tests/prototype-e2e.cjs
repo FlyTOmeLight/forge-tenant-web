@@ -27,7 +27,7 @@ const base =
     await page.goto(base);
     await button("重置演示").click();
     await page
-      .getByRole("heading", { name: "任务工作台", exact: true })
+      .getByRole("heading", { name: "我的任务", exact: true })
       .waitFor();
     assert.equal(await button("关联修复任务").count(), 0);
     for (const name of ["看板", "双栏", "表格"]) {
@@ -87,19 +87,55 @@ const base =
       .getByRole("heading", { name: "待我审查", exact: true })
       .waitFor();
     assert.equal(await button("新建修复任务").count(), 0);
+    await button("修复权限撤销后仍可执行的问题").waitFor();
+    await page.getByLabel("体验角色").selectOption("u-lin");
+    await page.waitForFunction(
+      () => document.querySelector("#operator-name")?.textContent === "林予安",
+    );
+    await page.getByLabel("体验角色").selectOption("u-chen");
+    await page.waitForFunction(
+      () => document.querySelector("#operator-name")?.textContent === "陈澄",
+    );
+    assert.equal(await button("成员与团队").count(), 0);
+    assert.equal(await button("权限同步").count(), 0);
+    assert.equal(await button("平台管理 ↗").count(), 0);
+    await button("我的任务").click();
+    await button("新建修复任务").click();
+    await dialog.locator("[name=project]").selectOption("p-0");
+    await dialog.locator("[type=submit]").click();
+    await dialog.getByLabel("周以宁", { exact: true }).waitFor();
+    await dialog.getByLabel("周以宁", { exact: true }).check();
+    await page.keyboard.press("Escape");
+    await page.getByLabel("体验角色").selectOption("u-platform");
+    await page.waitForFunction(
+      () =>
+        document.querySelector("#operator-name")?.textContent === "平台运营员",
+    );
+    await button("平台管理 ↗").click();
+    await page
+      .getByRole("heading", { name: "租户管理", exact: true })
+      .waitFor();
+    assert.equal(await page.locator("#tenant-switch").count(), 0);
+    assert.equal(await button("进入工作区").count(), 0);
+    await button("全局服务连接").click();
+    await page
+      .getByRole("heading", { name: "全局服务连接", exact: true })
+      .waitFor();
+    await page.getByLabel("体验角色").selectOption("u-zhou");
+    await page
+      .getByRole("heading", { name: "你没有此页面的访问权限" })
+      .waitFor();
+    await button("返回工作台").click();
     await page.getByLabel("体验角色").selectOption("u-lin");
     await page.waitForFunction(
       () => document.querySelector("#operator-name")?.textContent === "林予安",
     );
     for (const label of [
-      "企业管理",
       "成员与团队",
-      "项目与权限",
-      "接入与同步",
+      "权限同步",
       "审计记录",
-      "服务连接",
-      "项目空间",
-      "任务工作台",
+      "项目",
+      "我的任务",
     ]) {
       await page
         .locator("#nav")
@@ -119,7 +155,7 @@ const base =
     }
     await page.reload();
     await page
-      .getByRole("heading", { name: "任务工作台", exact: true })
+      .getByRole("heading", { name: "我的任务", exact: true })
       .waitFor();
     await page
       .getByRole("button", { name: "Vue migration acceptance", exact: true })
@@ -135,7 +171,9 @@ const base =
           "execution and human review",
           "configuration recheck",
           "reviewer permissions",
-          "shared tenant navigation",
+          "scope-based navigation and platform isolation",
+          "developer selects project reviewer",
+          "review queue includes other owners",
           "responsive widths",
           "persistence",
           "no live API calls",
