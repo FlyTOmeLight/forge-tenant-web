@@ -276,3 +276,125 @@ button:disabled {
     padding: 18px 16px;
   }
 }
+
+.run-trace {
+  border-bottom: 1px solid var(--border, #dce1ea);
+}
+.run-progress {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 18px 22px;
+  background: #f6f7fb;
+  border-left: 4px solid #9aa4b5;
+}
+.run-progress strong {
+  font-size: 14px;
+}
+.run-progress p {
+  margin: 6px 0 0;
+}
+.run-live {
+  border-left-color: #5144c4;
+  background: #f4f2ff;
+}
+.run-disconnected {
+  border-left-color: #a32c3a;
+}
+.run-trace > .notice {
+  margin: 12px 22px;
+}
+.run-timeline {
+  padding: 22px;
+}
+.run-history {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+.run-history h2 {
+  margin: 0;
+}
+.run-history label {
+  font-size: 13px;
+  min-width: 0;
+}
+.run-history select {
+  max-width: 360px;
+  font: inherit;
+  padding: 8px;
+  border: 1px solid #b6bfce;
+  border-radius: 6px;
+  background: white;
+}
+.run-events {
+  list-style: none;
+  margin: 22px 0 0;
+  padding: 0 0 0 16px;
+  border-left: 2px solid #e3e7ef;
+}
+.run-events > li {
+  position: relative;
+  padding: 0 0 22px 8px;
+  overflow-wrap: anywhere;
+}
+.run-events > li::before {
+  content: "";
+  position: absolute;
+  left: -22px;
+  top: 5px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #8276de;
+  border: 2px solid white;
+}
+.run-event-heading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: 14px;
+}
+.run-event-heading small {
+  color: #5d687b;
+  font-size: 12px;
+}
+.run-event-heading code,
+.run-target {
+  font:
+    12px/1.7 ui-monospace,
+    monospace;
+}
+.run-events details {
+  margin-top: 10px;
+}
+.run-events summary {
+  cursor: pointer;
+  font-size: 13px;
+  color: #5144c4;
+}
+.run-events .task-code {
+  max-width: 100%;
+}
+@media (max-width: 760px) {
+  .run-progress,
+  .run-timeline {
+    padding: 16px;
+  }
+  .run-progress {
+    align-items: flex-start;
+  }
+  .run-history select {
+    display: block;
+    max-width: 100%;
+    width: 100%;
+    margin-top: 6px;
+  }
+  .run-history label {
+    width: 100%;
+  }
+}

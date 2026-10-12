@@ -339,9 +339,11 @@ function editConfig() {
   if (!response) return;
   const s = response.settings,
     path = base(pid.value);
-  const models = [
-    ...new Set([...(response.models || []), ...(s.model ? [s.model] : [])]),
-  ];
+  const agents = response.agents || [];
+  if (!agents.length) {
+    notice.value = "尚无已发布 Agent，请先在 Agent 平台发布 Coding Agent。";
+    return;
+  }
   form({
     title: "编辑项目执行配置",
     text: "保存后需要重新检查接入。已开始的轮次保留其配置快照。",
@@ -355,14 +357,21 @@ function editConfig() {
           label: b.name,
         })),
       },
-      models.length
-        ? {
-            name: "model",
-            label: "模型",
-            value: s.model,
-            options: models.map((m) => ({ value: m, label: m })),
-          }
-        : field("model", "模型名称", s.model),
+      {
+        name: "agentID",
+        label: "Agent",
+        value: s.agentID || agents[0]!.id,
+        options: agents.map((agent) => ({
+          value: agent.id,
+          label: `${agent.name}（最新发布 v${agent.publishedVersion}）`,
+        })),
+      },
+      field(
+        "agentVersion",
+        "发布版本",
+        String(s.agentVersion || agents[0]!.publishedVersion),
+        "number",
+      ),
       field(
         "allowedPaths",
         "允许修改范围（每行一项）",
@@ -389,6 +398,7 @@ function editConfig() {
         body: JSON.stringify({
           ...values,
           version: s.version,
+          agentVersion: Number(values.agentVersion),
           allowedPaths: values
             .allowedPaths!.split("\n")
             .map((v) => v.trim())
@@ -740,7 +750,18 @@ void refresh();
         <dl class="config-grid">
           <dt>基准分支</dt>
           <dd>{{ config.settings.baseBranch || "尚未配置" }}</dd>
-          <dt>模型</dt>
+          <dt>Agent</dt>
+          <dd>
+            {{
+              config.agents?.find(
+                (agent) => agent.id === config?.settings.agentID,
+              )?.name ||
+              config.settings.agentID ||
+              "尚未绑定"
+            }}
+            · v{{ config.settings.agentVersion || "—" }}
+          </dd>
+          <dt>模型（来自 Agent 发布版本）</dt>
           <dd>{{ config.settings.model || "尚未配置" }}</dd>
           <dt>允许修改范围</dt>
           <dd>

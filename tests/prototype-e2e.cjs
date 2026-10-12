@@ -63,12 +63,21 @@ const base =
     await dialog.locator("[type=submit]").click();
     await dialog.waitFor({ state: "hidden" });
     await page.locator("[data-tab=changes]").click();
-    await page.getByRole("heading", { name: "最近一轮代码差异" }).waitFor();
+    await page.getByRole("heading", { name: "当前 MR 代码差异" }).waitFor();
     await button("人工介入").click();
     await dialog.locator("[type=submit]").click();
     await dialog.waitFor({ state: "hidden" });
     await button("项目执行配置").click();
     await button("编辑执行配置").click();
+    assert.equal(
+      await dialog.getByLabel("Agent", { exact: true }).inputValue(),
+      "demo-coding-agent",
+    );
+    assert.equal(
+      await dialog.getByLabel("发布版本", { exact: true }).inputValue(),
+      "1",
+    );
+    assert.equal(await dialog.locator("[name=model]").count(), 0);
     await dialog.locator("[name=repairLimit]").fill("2");
     await dialog.locator("[type=submit]").click();
     await dialog.waitFor({ state: "hidden" });

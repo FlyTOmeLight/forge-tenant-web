@@ -107,3 +107,15 @@ FORGE_PROTOTYPE_URL="file://$PWD/dist/forge-prototype.html" npm run test:prototy
 项目权限取各来源最高角色。移出团队或撤销一条授权时，其余来源保留。团队角色最终同步为 GitLab 的每人项目角色。任务负责人、指定审查者和受保护分支的限制继续生效。
 
 前后端配套使用版本 5 数据结构；原型使用独立演示存储版本，重置后可演练团队角色继承与撤销。
+
+## Forge → GitLab 单点登录
+
+API/Web `0.7.0-sso` 将两个应用的浏览器授权入口统一到 Forge 登录页。登录一次 Forge 后，点击项目或 MR 链接即可自动进入 GitLab，并保留原目标页面。升级前会话需要退出 Forge 后重新登录一次。
+
+`npm run test:sso` 使用现有测试管理员和已有可访问 MR 验证单点登录，不创建或修改 MR；结果保存在 `.local/sso-evidence/`。完整租户、权限与项目单点登录回归仍使用 `npm run test:e2e`。身份提供方配置步骤见后端 README 的“本机 Forge → GitLab 单点登录”。
+
+### Agent 运行过程
+
+任务详情始终显示最近一轮的运行阶段、耗时和最后活动时间。选择“运行过程”可切换历史轮次，查看 Agent 的公开回复、工具名称、调用参数、返回结果、耗时及停止原因。活动轮次每 2 秒读取新事件；刷新页面按事件序号回放。更新失败会明确标记并保留已读取记录。查看记录不会恢复或启动任务。运行时私有 checkpoint 不进入浏览器。
+
+`FORGE_TRACE_FIXTURE=/path/to/task-detail.json npm run test:trace` 使用真实登录及受控任务/事件响应验证实时更新、分页重连、历史切换、失败展示与移动布局，不启动真实任务。待部署构建可加 `FORGE_TRACE_LOCAL_BUILD=1`。

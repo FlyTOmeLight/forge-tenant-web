@@ -1,3 +1,35 @@
+## 2026-10-05 代码差异阅读器
+
+用 diff2html 3.4.56（MIT）解析已保存补丁，展示文件、新旧行号、红绿增删行、词级变化和增删统计。支持合并视图、左右对比及按文件折叠。代码差异页与执行记录共用阅读器；下载仍返回原始补丁。生产依赖审计无已知漏洞。
+
+`npm run test:diff` 使用真实任务 `task_613ff7c5f39400d2f24e1468`，检查行号及其可见位置、增删行、原始下载、左右布局、键盘折叠和窄屏不溢出。通过只读页面响应替换覆盖多文件、新增、删除、重命名及 HTML 源码转义，不修改真实任务。截图保存在 `.local/diff-evidence/`。
+
+验证：`npm run build`、`npm run format:check`、`npm run test:diff`。
+
+## 2026-10-05：未发布分支的 GitLab 链接修复
+
+用户报告任务 `task_95cfed62c2056e901ca33f25` 的工作分支链接返回 404。真实 GitLab API 确认项目存在、目标分支不存在。此前任务详情仅凭预定分支名生成链接，误将未发布的分支当成可访问产物。
+
+任务详情新增 `gitlabTarget`，区分 MR、已发布分支和项目。无 MR 时查询真实分支；404 返回项目入口和未发布说明，其他查询失败明确报错。已有 MR 不依赖分支查询。
+
+- 旧实现的回归测试失败；修复后真实 PostgreSQL 全部 Go race 测试、Go vet、Helm lint 通过，数据库测试无跳过。
+- Vue 类型检查、构建和 Prettier 检查通过。
+- 真实浏览器使用上述任务，确认不存在“打开工作分支”链接，展示“打开 GitLab 项目”和未发布说明；点击后到达真实项目。已有 MR !3 的入口也通过回归。两种场景均只在 Forge 提交一次密码，GitLab 身份一致。
+- Coding API 与 Web 已部署 `0.7.1-delivery-links` 到 `forge-tenant-split`，未恢复任务执行或修改 GitLab 代码。
+
+复现：前端仓库 `SSO_TASK_ID=task_95cfed62c2056e901ca33f25 SSO_EXPECT_TARGET=project npm run test:sso`；已有 MR 使用 `npm run test:sso`。脱敏结果与截图见前端 `.local/sso-evidence/result-project.json`、`result-mergeRequest.json`、`forge-project.png`。
+
+## 2026-10-05：Forge → GitLab 单点登录
+
+部署于 `forge-tenant-split`，API/Web 镜像为 `0.7.0-sso`。Forge 入口 `http://127.0.0.1:8483`，GitLab 入口 `http://127.0.0.1:18080`。GitLab 继续使用 Chart 10.4.1 / CE 19.4.1。
+
+- 先用真实 PostgreSQL 回归测试复现身份 Cookie 被丢弃，旧实现失败；修复后后端全部 `go test -tags=nomsgpack -race -count=1 ./...` 通过，无数据库跳过；Go vet、Helm lint 通过。
+- Vue 类型检查、生产构建和 Prettier 检查通过；前后端镜像构建通过。
+- 真实身份与权限 E2E 13 组通过。GitLab 检查改为复用已登录 Forge 成员的浏览器上下文，不再次输入账号密码。
+- 独立 SSO 验收 7 项通过：从实际任务 `task_fc020e1fac4480634a4767e6` 点击 MR !3 链接并返回原 MR；全程仅提交一次密码；GitLab 用户 ID 为 5，与 Forge 预配置映射一致；刷新保留登录；匿名仍需登录；退出清除 Forge/身份 Cookie；过期身份会话回到表单。浏览器没有 DNS 映射或证书例外，未修改 MR。
+
+复现命令见前端 `npm run test:sso` 与后端 README。原始脱敏结果在前端 `.local/sso-evidence/result.json`，MR 截图为 `gitlab-mr.png`，完整权限回归为 `tenant-e2e.json`。升级前登录过的浏览器需退出 Forge 后重新登录一次，以建立新增身份会话。此变更提供单点登录；退出 Forge 不会终止 GitLab 已有的独立会话。
+
 ## 2026-10-05：Coding 后端拆分
 
 研发任务已迁到独立 forge-coding-api；原任务 ID、MR 关联和未知停止状态保留。统一控制台按接口路径访问两个后端。真实模型修复、Draft MR、人工介入与撤权停止均已验证；详见 [Coding 验证记录](https://github.com/FlyTOmeLight/forge-coding-api/blob/main/docs/verification.md)。身份与权限浏览器回归 13 项通过。

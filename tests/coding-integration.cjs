@@ -60,7 +60,8 @@ if (!process.env.FORGE_CODING_PILOT)
     await api("PUT", prefix + "/coding-settings", {
       ...settings,
       baseBranch: "main",
-      model: pilot.model || settings.model,
+      agentID: pilot.agentID || settings.agentID,
+      agentVersion: pilot.agentVersion || settings.agentVersion,
       allowedPaths: ["src/"],
       checks: ["python3 -m unittest discover -s src"],
       repairLimit: 3,

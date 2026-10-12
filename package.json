@@ -14,9 +14,14 @@
     "format": "prettier --write src tests scripts/*.cjs *.ts *.json index.html",
     "format:check": "prettier --check src tests scripts/*.cjs *.ts *.json index.html",
     "test:prototype": "node tests/prototype-e2e.cjs",
-    "export:prototype": "npm run build && node scripts/export-prototype.cjs"
+    "export:prototype": "npm run build && node scripts/export-prototype.cjs",
+    "test:sso": "node tests/sso.cjs",
+    "test:diff": "node tests/code-diff.cjs",
+    "test:trace": "node tests/run-trace.cjs",
+    "test:task-diff": "node tests/task-diff.cjs"
   },
   "dependencies": {
+    "diff2html": "3.4.56",
     "vue": "3.5.43"
   },
   "devDependencies": {

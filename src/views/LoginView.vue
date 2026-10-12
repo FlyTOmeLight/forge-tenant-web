@@ -28,54 +28,67 @@ onMounted(async () => {
       !source.get("redirect_uri") ||
       !source.get("state")
     )
-      throw Error("请从研发平台发起登录。");
+      throw Error("请从研发平台或 GitLab 发起登录。");
     const response = await fetch(`/api/get-app-login?${query}`),
       result = await response.json();
     if (!response.ok || result.status !== "ok" || !result.data?.name)
       throw Error("登录请求无效，请返回应用重新发起。");
     application = result.data;
+    if (result.sessionAvailable) {
+      status.value = "正在使用企业登录状态继续…";
+      if (await authorize(false)) return;
+      status.value = "登录状态已过期，请重新登录。";
+    }
     ready.value = true;
   } catch (e) {
     status.value = message(e);
   }
 });
+async function authorize(withPassword: boolean): Promise<boolean> {
+  const response = await fetch(`/api/login?${query}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      type: "code",
+      application: application.name,
+      organization: application.organization,
+      ...(withPassword
+        ? {
+            username: username.value,
+            password: password.value,
+            signinMethod: "Password",
+          }
+        : {}),
+    }),
+  });
+  const result = await response.json();
+  if (!response.ok || result.status !== "ok") {
+    if (!withPassword && response.ok) return false;
+    throw Error(
+      result.error?.message || result.msg || "登录失败，请检查账号与密码。",
+    );
+  }
+  if (
+    typeof result.data !== "string" ||
+    !result.data ||
+    result.data2 ||
+    result.data3
+  )
+    throw Error("此账号需要额外验证，请联系管理员。");
+  // The backend and Casdoor validate the exact client/callback pair before login.
+  const target = new URL(source.get("redirect_uri")!);
+  target.searchParams.set("code", result.data);
+  target.searchParams.set("state", source.get("state")!);
+  password.value = "";
+  location.assign(target.href);
+  return true;
+}
 async function login() {
   if (!ready.value || busy.value) return;
   busy.value = true;
   status.value = "正在登录…";
   try {
-    const response = await fetch(`/api/login?${query}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        type: "code",
-        application: application.name,
-        organization: application.organization,
-        username: username.value,
-        password: password.value,
-        signinMethod: "Password",
-      }),
-    });
-    const result = await response.json();
-    if (!response.ok || result.status !== "ok")
-      throw Error(result.msg || "登录失败，请检查账号与密码。");
-    if (
-      typeof result.data !== "string" ||
-      !result.data ||
-      result.data2 ||
-      result.data3
-    )
-      throw Error("此账号需要额外验证，请联系管理员。");
-    const target = new URL(source.get("redirect_uri")!);
-    if (
-      target.origin !== location.origin ||
-      target.pathname !== "/auth/callback"
-    )
-      throw Error("登录回调地址无效。");
-    target.searchParams.set("code", result.data);
-    target.searchParams.set("state", source.get("state")!);
-    password.value = "";
-    location.assign(target.href);
+    await authorize(true);
   } catch (e) {
     status.value = message(e);
     busy.value = false;

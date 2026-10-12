@@ -13,7 +13,7 @@ const privateConfig = JSON.parse(
 );
 const lab = JSON.parse(fs.readFileSync(process.env.LAB_CONFIG, "utf8"));
 const base = privateConfig.publicURL,
-  gl = process.env.GITLAB_TEST_URL || "http://127.0.0.1:8181";
+  gl = process.env.GITLAB_TEST_URL || "http://127.0.0.1:18080";
 const evidence = path.join(root, ".local/evidence");
 fs.mkdirSync(evidence, { recursive: true });
 const suffix = Date.now().toString(36),
@@ -27,10 +27,7 @@ const suffix = Date.now().toString(36),
         ? "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
         : undefined),
     headless: true,
-    args: [
-      "--no-proxy-server",
-      "--host-resolver-rules=MAP identity.tenant-lab.svc.cluster.local 127.0.0.1, MAP gitlab-webservice-default.tenant-lab.svc.cluster.local 127.0.0.1",
-    ],
+    args: ["--no-proxy-server"],
   });
   const admin = await browser.newContext({
       viewport: { width: 1440, height: 1000 },
@@ -565,21 +562,13 @@ const suffix = Date.now().toString(36),
     );
     assert.equal(csrfResponse.status(), 403);
     checks.push("真实服务重复请求复用结果；请求内容冲突与 CSRF 被拒绝");
-    const gitlabContext = await browser.newContext({ ignoreHTTPSErrors: true });
-    const gp = await gitlabContext.newPage();
-    await gp.goto(
-      "http://gitlab-webservice-default.tenant-lab.svc.cluster.local:8181/users/sign_in",
-    );
-    await gp.getByText("Enterprise Account", { exact: true }).click();
-    await gp.locator("#username").fill(username);
-    await gp.locator("#password").fill(password);
-    await gp.locator("#submit").click();
-    await gp.waitForURL(
-      (u) =>
-        u.hostname.startsWith("gitlab-webservice-default.") &&
-        !u.pathname.startsWith("/users/"),
-      { timeout: 45000 },
-    );
+    // Same browser session as Forge; never enter credentials on the GitLab path.
+    const gp = await member.newPage();
+    const gitlabProject = await git("GET", `/projects/${p2.gitlab_id}`);
+    const target = gl + "/" + gitlabProject.path_with_namespace;
+    await gp.goto(target);
+    await gp.waitForURL((u) => u.href === target, { timeout: 45000 });
+    await gp.locator('meta[name="csrf-token"]').waitFor({ state: "attached" });
     const gitlabMe = await gp.evaluate(async () => {
       const csrf = document.querySelector('meta[name="csrf-token"]')?.content;
       const r = await fetch("/api/v4/user", {
@@ -592,9 +581,9 @@ const suffix = Date.now().toString(36),
       path: path.join(evidence, "gitlab-real-user.png"),
       fullPage: true,
     });
-    await gitlabContext.close();
+    await gp.close();
     checks.push(
-      "平台创建的新账号通过自有登录页实际登录 GitLab，用户 ID 与预配置绑定一致",
+      "Forge 已登录成员直接进入 GitLab 项目，无需再次输入密码，用户 ID 与预配置绑定一致",
     );
     await page.goto(base);
     await page.locator("#tenant-switch").selectOption(tid2);
@@ -652,7 +641,7 @@ const suffix = Date.now().toString(36),
           project_ids: [p.gitlab_id, p2.gitlab_id],
           gitlab_user_id: m.gitlab_id,
           scope: "真实 PostgreSQL / Casdoor / GitLab CE；未连接 Agent 执行器",
-          gitlabBrowserUsesLabCAException: true,
+          gitlabBrowserUsesLabCAException: false,
         },
         null,
         2,
@@ -679,7 +668,11 @@ const suffix = Date.now().toString(36),
     console.error(
       safe
         .replace(/https?:\/\/\S+/g, "[URL]")
-        .replace(/[a-f0-9]{64}/g, "[redacted]"),
+        .replace(
+          /(cookie|authorization|private-token):[^\n]*/gi,
+          "$1: [redacted]",
+        )
+        .replace(/[a-f0-9]{32,}/g, "[redacted]"),
     );
     process.exitCode = 1;
   } finally {

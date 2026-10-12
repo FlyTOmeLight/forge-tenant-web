@@ -134,6 +134,8 @@ export interface Judgment {
   summary?: string;
 }
 export interface CodingSettings {
+  agentID: string;
+  agentVersion: number;
   version: number;
   baseBranch: string;
   model: string;
@@ -148,7 +150,7 @@ export interface SettingsResponse {
   branches: { name: string }[];
   executors: { worker_id: string; last_seen: string }[];
   permissions: ProjectPermissions;
-  models: string[];
+  agents: { id: string; name: string; publishedVersion: number }[];
 }
 export interface Connections {
   gitlab: { status: string; url?: string };
@@ -201,6 +203,8 @@ export interface Feedback {
   head: string;
 }
 export interface Run {
+  runtime_id?: string | null;
+  finished_at?: string | null;
   config_snapshot?: CodingSettings;
   id: string;
   status: string;
@@ -218,6 +222,16 @@ export interface Run {
     patch?: string;
   } | null;
 }
+export interface TaskDiff {
+  mrIid: number;
+  base: string;
+  head: string;
+  start: string;
+  sourceBranch: string;
+  targetBranch: string;
+  patch: string;
+}
+
 export interface TaskDetail {
   task: Task;
   permissions: {
@@ -227,6 +241,7 @@ export interface TaskDetail {
     review: boolean;
   };
   gitlabUrl: string;
+  gitlabTarget: "mergeRequest" | "branch" | "project";
   feedback: Feedback[];
   runs: Run[];
   events: {
@@ -273,4 +288,41 @@ export interface TeamGrant {
   name: string;
   role: string;
   member_count: number;
+}
+
+export interface RunEvent {
+  runID: string;
+  seq: number;
+  kind: string;
+  createdAt: string;
+  payload: {
+    stepID?: string;
+    name?: string;
+    arguments?: string;
+    argumentsTruncated?: boolean;
+    result?: string;
+    resultTruncated?: boolean;
+    output?: string;
+    outputTruncated?: boolean;
+    detail?: string;
+    detailTruncated?: boolean;
+    error?: string;
+    waitingStep?: string;
+    attempt?: number;
+  };
+}
+export interface RunTrace {
+  run: {
+    id: string;
+    status: string;
+    error?: string;
+    output?: string;
+    waitingStep?: string;
+    eventSeq: number;
+    attempt: number;
+  } | null;
+  events: RunEvent[];
+  latestEvent?: RunEvent;
+  nextSeq: number;
+  hasMore: boolean;
 }

@@ -2,8 +2,16 @@
 import { computed, onMounted, onUnmounted, ref, shallowRef, watch } from "vue";
 import { api, message } from "../api";
 import { demo } from "../prototype";
-import type { Member, ProjectPerson, TaskDetail, Field } from "../types";
+import type {
+  Member,
+  ProjectPerson,
+  TaskDetail,
+  TaskDiff,
+  Field,
+} from "../types";
 import FormDialog from "../components/FormDialog.vue";
+import CodeDiff from "../components/CodeDiff.vue";
+import RunTrace from "../components/RunTrace.vue";
 import StatusBadge from "../components/StatusBadge.vue";
 const props = defineProps<{
   tenantId: string;
@@ -14,6 +22,28 @@ const props = defineProps<{
 }>();
 const emit = defineEmits<{ navigate: [path: string] }>();
 const detail = ref<TaskDetail>();
+const mrDiff = ref<TaskDiff>();
+const diffLoading = ref(false),
+  diffError = ref("");
+let diffRequest = 0;
+async function refreshDiff() {
+  if (!task.value || diffLoading.value) return;
+  const endpoint = path() + "/" + props.taskId + "/diff";
+  const request = ++diffRequest;
+  diffLoading.value = true;
+  try {
+    const result = await api<TaskDiff>(endpoint);
+    if (request !== diffRequest) return;
+    mrDiff.value = result;
+    diffError.value = "";
+  } catch (error) {
+    if (request !== diffRequest) return;
+    mrDiff.value = undefined;
+    diffError.value = message(error);
+  } finally {
+    if (request === diffRequest) diffLoading.value = false;
+  }
+}
 const people = ref<ProjectPerson[]>([]);
 const tab = ref("overview"),
   status = ref("正在读取项目授权…"),
@@ -51,7 +81,8 @@ const tabs = [
   ["changes", "代码差异"],
   ["comments", "代码评论"],
   ["checks", "验证与审查"],
-  ["logs", "执行记录"],
+  ["trace", "运行过程"],
+  ["logs", "操作记录"],
 ];
 const notes = computed(() =>
   (task.value?.discussions || []).flatMap((d) =>
@@ -113,6 +144,7 @@ async function refresh() {
     ]);
     detail.value = d;
     people.value = p.items;
+    if (tab.value === "changes") void refreshDiff();
     status.value = "数据已更新 · " + new Date().toLocaleTimeString("zh-CN");
   } catch (e) {
     status.value = message(e);
@@ -137,7 +169,7 @@ function show(
   text: string,
   fields: Field[],
   submitLabel: string,
-  fn: (values: Record<string, string>) => Promise<void>,
+  fn: (values: Record<string, string>) => Promise<string>,
 ) {
   dialog.value = {
     key: ++serial,
@@ -146,30 +178,40 @@ function show(
     fields,
     submitLabel,
     submit: async (values) => {
-      await fn(values);
+      const result = await fn(values);
       dialog.value = undefined;
       await refresh();
-      notify("操作已保存");
+      notify(result);
     },
   };
 }
-function action(kind: string) {
+function action(kind: string, feedbackId?: string) {
   const t = task.value!;
+  const saved = feedbackId
+    ? feedback.value.find((f) => f.id === feedbackId)
+    : undefined;
   const base = path() + "/" + t.id;
   const version = t.version,
     head = t.head;
   const texts: Record<string, string> = {
     Intervene: "立即禁止自动写入，并请求执行器停止。停止确认前不能恢复 Agent。",
     Cancel: "停止继续处理任务，保留分支与 MR。",
-    Approve: "认可只针对当前代码版本，不代表任务完成。",
+    Approve:
+      "认可当前代码版本后，将取消 GitLab MR 的 Draft 状态。请在 GitLab 核对其余合并条件并人工合入。",
     Continue: "重新开启任务处理资格，保持人工处理。",
-    Resume: "将以当前代码版本执行新一轮，并重新验证。",
-    Feedback: "评论不会自动执行。请整合相互冲突的意见后正式提交。",
+    Resume:
+      "将以当前代码版本执行新一轮，并重新验证。已有 MR 会恢复 Draft，等待新版本审查。",
+    Feedback:
+      t.control === "Human"
+        ? "当前为人工处理。本次只保存修改要求，负责人需要显式恢复 Agent 后才会执行。"
+        : t.activeRun
+          ? "当前轮次仍在执行。本次要求会排队，待本轮结束后由负责人开始。"
+          : "请整合相互冲突的意见后正式提交，Agent 将开始新一轮。",
     Transfer:
       "只改变处理责任，保留当前控制权、分支与 MR。后端核对新负责人的项目写权限。",
   };
   const fields: Field[] = [];
-  if (["Resume", "Feedback", "Answer"].includes(kind))
+  if (["Resume", "Feedback", "Answer"].includes(kind) && !saved)
     fields.push({
       name: "text",
       label: "本轮已整合的修改要求",
@@ -185,18 +227,39 @@ function action(kind: string) {
     });
   show(
     labels[kind] || kind,
-    (texts[kind] || "") + "\n当前版本 " + head,
+    (texts[kind] || "") +
+      (saved ? "\n本轮要求：" + saved.requirements : "") +
+      "\n当前版本 " +
+      head,
     fields,
-    kind === "Resume"
-      ? "恢复并开始本轮"
-      : kind === "Feedback"
-        ? "正式提交"
-        : "确认",
+    saved
+      ? "恢复并执行这条要求"
+      : kind === "Resume"
+        ? "恢复并开始本轮"
+        : kind === "Feedback"
+          ? "正式提交"
+          : "确认",
     async (values) => {
       await api(base + "/actions", {
         method: "POST",
-        body: JSON.stringify({ action: kind, version, head, ...values }),
+        body: JSON.stringify({
+          action: kind,
+          version,
+          head,
+          ...(saved ? { feedbackId: saved.id } : {}),
+          ...values,
+        }),
       });
+      if (kind === "Feedback") {
+        return t.control === "Human"
+          ? "修改要求已保存，等待负责人恢复 Agent"
+          : t.activeRun
+            ? "修改要求已排队，等待本轮结束"
+            : "修改要求已提交，Agent 即将执行";
+      }
+      return kind === "Resume"
+        ? "Agent 已恢复，本轮已加入执行队列"
+        : "操作已保存";
     },
   );
 }
@@ -218,14 +281,21 @@ async function reconfirm(id: string) {
   }
 }
 watch(
-  () => props.taskId,
+  () => [props.tenantId, props.projectId, props.taskId],
   () => {
     tab.value = "overview";
     detail.value = undefined;
+    diffRequest++;
+    mrDiff.value = undefined;
+    diffError.value = "";
+    diffLoading.value = false;
     void refresh();
   },
   { immediate: true },
 );
+watch(tab, (value) => {
+  if (value === "changes") void refreshDiff();
+});
 watch(
   () => props.refreshVersion,
   () => {
@@ -240,6 +310,7 @@ onMounted(() => {
 onUnmounted(() => {
   clearInterval(poll);
   clearTimeout(timer);
+  diffRequest++;
 });
 async function simulate(type: string) {
   try {
@@ -269,7 +340,7 @@ const simulations = [
   ["late-delivery", "迟到交付"],
 ];
 function download() {
-  const patch = detail.value?.runs.find((r) => r.output?.patch)?.output?.patch;
+  const patch = mrDiff.value?.patch;
   if (!patch) return;
   const url = URL.createObjectURL(new Blob([patch], { type: "text/plain" }));
   const a = document.createElement("a");
@@ -377,13 +448,23 @@ const eventNames: Record<string, string> = {
               role="tab"
               :data-tab="key"
               :aria-selected="tab === key"
-              aria-controls="task-body"
+              :aria-controls="key === 'trace' ? 'run-timeline' : 'task-body'"
               @click="tab = key!"
             >
               {{ label }}
             </button>
           </div>
-          <div id="task-body" role="tabpanel" :aria-labelledby="'tab-' + tab">
+          <RunTrace
+            :task-path="path() + '/' + taskId"
+            :runs="detail!.runs"
+            :expanded="tab === 'trace'"
+          />
+          <div
+            v-show="tab !== 'trace'"
+            id="task-body"
+            role="tabpanel"
+            :aria-labelledby="'tab-' + tab"
+          >
             <template v-if="tab === 'overview'"
               ><h2>问题与复现</h2>
               <p class="task-copy">{{ task.description }}</p>
@@ -447,11 +528,28 @@ const eventNames: Record<string, string> = {
                 <strong>{{
                   f.status === "NeedsReconfirmation"
                     ? "等待核对新版本"
-                    : "等待本轮结束"
+                    : task.control === "Human"
+                      ? "等待负责人恢复 Agent"
+                      : task.activeRun
+                        ? "等待本轮结束"
+                        : "等待开始下一条要求"
                 }}</strong>
                 <p>{{ f.requirements }}</p>
-                <span class="task-commit">{{ f.head }}</span
-                ><button
+                <span class="task-commit">{{ f.head }}</span>
+                <button
+                  v-if="
+                    permission?.manage &&
+                    task.control === 'Human' &&
+                    idle &&
+                    f.status === 'Pending'
+                  "
+                  class="btn primary"
+                  :data-resume-feedback="f.id"
+                  @click="action('Resume', f.id)"
+                >
+                  恢复并执行这条要求
+                </button>
+                <button
                   v-if="permission?.review"
                   class="btn"
                   :data-reconfirm="f.id"
@@ -499,14 +597,19 @@ const eventNames: Record<string, string> = {
                 {{
                   task.approvalHead === task.head
                     ? "当前版本已经认可，仍需在 GitLab 人工合入。"
-                    : "审查代码和验证证据后，记录对当前版本的认可。"
+                    : "审查代码和验证证据后认可当前版本，GitLab MR 将取消 Draft。"
                 }}
               </p>
               <button
                 v-if="permission?.review && !ended"
                 class="btn primary"
                 data-action="Approve"
-                :disabled="loading"
+                :disabled="
+                  loading ||
+                  !!task.activeRun ||
+                  !task.stopConfirmed ||
+                  !task.mrIid
+                "
                 @click="action('Approve')"
               >
                 认可当前代码版本
@@ -560,33 +663,60 @@ const eventNames: Record<string, string> = {
                 </p>
                 <details v-if="run.output?.patch">
                   <summary>查看本轮代码差异</summary>
-                  <pre class="task-code">{{ run.output.patch }}</pre>
+                  <CodeDiff :patch="run.output.patch" />
                 </details>
+                <p v-else-if="run.output?.patch === ''" class="muted">
+                  本轮没有新的代码改动。
+                </p>
               </details></template
             >
-            <template v-else-if="tab === 'changes'"
-              ><h2>最近一轮代码差异</h2>
-              <template
-                v-for="run in detail!.runs
-                  .filter((r) => r.output?.patch)
-                  .slice(0, 1)"
-                :key="run.id"
-                ><p
-                  v-if="run.output?.checksCommit !== task.head"
-                  class="notice"
+            <template v-else-if="tab === 'changes'">
+              <section :aria-busy="diffLoading" aria-label="当前 MR 差异">
+                <h2>当前 MR 代码差异</h2>
+                <button
+                  class="btn small"
+                  :disabled="diffLoading"
+                  @click="refreshDiff"
                 >
-                  历史执行差异，当前代码版本可能已变化。
+                  {{
+                    diffLoading
+                      ? "读取中…"
+                      : diffError
+                        ? "重新读取"
+                        : "刷新差异"
+                  }}
+                </button>
+                <p v-if="diffError" role="alert" class="task-warning">
+                  {{ diffError }}
                 </p>
-                <button class="btn" @click="download">下载补丁</button>
-                <pre class="task-code">{{ run.output?.patch }}</pre>
-              </template>
-              <p
-                v-if="!detail!.runs.some((r) => r.output?.patch)"
-                class="muted"
-              >
-                暂无已保存的差异。
-              </p></template
-            >
+                <p v-else-if="!mrDiff" role="status">
+                  正在读取 GitLab MR 差异…
+                </p>
+                <template v-else-if="mrDiff.mrIid">
+                  <p class="muted">
+                    MR !{{ mrDiff.mrIid }} · {{ mrDiff.sourceBranch }} →
+                    {{ mrDiff.targetBranch }} · 当前完整差异
+                  </p>
+                  <p class="task-commit">
+                    比较基准 {{ mrDiff.base }} → {{ mrDiff.head }}
+                  </p>
+                  <p v-if="mrDiff.head !== task.head" class="notice">
+                    GitLab 的差异版本与任务记录不同，请同步 GitLab 状态。
+                  </p>
+                  <CodeDiff v-if="mrDiff.patch" :patch="mrDiff.patch">
+                    <template #actions
+                      ><button class="btn small" @click="download">
+                        下载补丁
+                      </button></template
+                    >
+                  </CodeDiff>
+                  <p v-else class="muted">当前 MR 没有代码差异。</p>
+                </template>
+                <p v-else class="muted">
+                  尚未创建 MR。单轮改动可在“验证与审查”中查看。
+                </p>
+              </section>
+            </template>
             <template v-else
               ><article
                 v-for="event in detail!.events"
@@ -653,9 +783,18 @@ const eventNames: Record<string, string> = {
               :href="detail!.gitlabUrl"
               target="_blank"
               rel="noopener"
-              >{{ task.mrIid ? "打开 GitLab MR" : "打开工作分支" }}</a
+              >{{
+                detail!.gitlabTarget === "mergeRequest"
+                  ? "打开 GitLab MR"
+                  : detail!.gitlabTarget === "branch"
+                    ? "打开工作分支"
+                    : "打开 GitLab 项目"
+              }}</a
             >
           </div>
+          <p v-if="detail!.gitlabTarget === 'project'" class="muted small-text">
+            工作分支尚未发布到 GitLab，当前可查看项目。
+          </p>
           <p class="muted small-text">
             人工审查通过不结束任务；任务以 MR 合入为完成条件。
           </p>

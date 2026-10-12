@@ -83,6 +83,8 @@ export function createPrototype() {
         {
           version: 1,
           baseBranch: "main",
+          agentID: "demo-coding-agent",
+          agentVersion: 1,
           model: "qwen3.8:27b-mlx",
           allowedPaths: p.name === "portal-web" ? ["src/"] : ["internal/"],
           checks:
@@ -390,6 +392,7 @@ export function createPrototype() {
         head: p.commit,
       })),
       events: r.events,
+      gitlabTarget: task(r).mrIid ? "mergeRequest" : "project",
       gitlabUrl:
         "#task/" +
         (r.tenant_id || "demo-tenant") +
@@ -467,6 +470,8 @@ export function createPrototype() {
       settings: db.settings[pid] || {
         version: 0,
         baseBranch: "",
+        agentID: "",
+        agentVersion: 0,
         model: "",
         allowedPaths: [],
         checks: [],
@@ -480,7 +485,15 @@ export function createPrototype() {
       ],
       executors: [{ worker_id: "原型模拟执行器", last_seen: now() }],
       permissions: projectPermissions(pid),
-      models: access(pid).manage ? ["qwen3.8:27b-mlx", "deepseek-coder"] : [],
+      agents: access(pid).manage
+        ? [
+            {
+              id: "demo-coding-agent",
+              name: "Coding Agent（演示）",
+              publishedVersion: 1,
+            },
+          ]
+        : [],
     };
   }
   function snapshot(id) {
@@ -841,13 +854,15 @@ export function createPrototype() {
         if (method === "GET") return settings(pid);
         if (!a.manage) throw Error("需要项目管理员权限。");
         if (parts[7] === "check") {
-          if (!db.settings[pid]?.model) throw Error("请先填写执行配置。");
+          if (!db.settings[pid]?.agentID) throw Error("请先填写执行配置。");
           db.settings[pid].checkedAt = now();
           result = { message: "原型接入检查通过" };
         } else {
           if (b.version !== settings(pid).settings.version)
             throw Error("配置已更新，请刷新。");
           if (
+            !b.agentID ||
+            b.agentVersion !== 1 ||
             !b.allowedPaths.length ||
             !b.checks.length ||
             b.repairLimit < 1 ||
@@ -856,7 +871,12 @@ export function createPrototype() {
             b.timeoutMinutes > 30
           )
             throw Error("请填写修改范围、检查命令及有效执行上限。");
-          db.settings[pid] = { ...b, version: b.version + 1, checkedAt: null };
+          db.settings[pid] = {
+            ...b,
+            model: "qwen3.8:27b-mlx",
+            version: b.version + 1,
+            checkedAt: null,
+          };
           db.tasks
             .filter((r) => r.projectId === pid)
             .forEach((r) =>
@@ -925,6 +945,26 @@ export function createPrototype() {
             (r) => r.state.id === parts[7] && r.projectId === pid,
           );
           if (!r) throw Error("任务不存在。");
+          if (
+            method === "GET" &&
+            parts[8] === "runs" &&
+            parts[10]?.startsWith("trace")
+          )
+            return { run: null, events: [], nextSeq: 0, hasMore: false };
+          if (method === "GET" && parts[8] === "diff") {
+            const t = task(r);
+            return {
+              mrIid: t.mrIid,
+              base: "demo-base",
+              head: t.head,
+              start: "demo-base",
+              sourceBranch: t.branch,
+              targetBranch: t.targetBranch,
+              patch: t.mrIid
+                ? 'diff --git a/internal/params.go b/internal/params.go\n--- a/internal/params.go\n+++ b/internal/params.go\n@@ -0,0 +1,2 @@\n+// 演示 MR 的完整差异\n+if input == "" { return ErrInvalidInput }\n'
+                : "",
+            };
+          }
           if (method === "GET") return details(r);
           if (parts[8] === "sync") return details(r);
           if (b.version !== r.apiVersion)
@@ -1066,6 +1106,8 @@ export function createPrototype() {
         db.settings[pid] = {
           version: 0,
           baseBranch: "",
+          agentID: "",
+          agentVersion: 0,
           model: "",
           allowedPaths: [],
           checks: [],

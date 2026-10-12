@@ -75,11 +75,12 @@ function close() {
       <div class="modal-body">
         <div id="form-error" class="form-error" role="alert">{{ error }}</div>
         <slot />
-        <label v-for="field in fields" :key="field.name" class="field"
-          >{{ field.label }}
+        <div v-for="field in fields" :key="field.name" class="field">
+          <label :for="`dialog-field-${field.name}`">{{ field.label }}</label>
           <select
             v-if="field.options"
             v-model="values[field.name]"
+            :id="`dialog-field-${field.name}`"
             :name="field.name"
             :required="field.required !== false"
             :disabled="busy"
@@ -95,6 +96,7 @@ function close() {
           <textarea
             v-else-if="field.type === 'textarea'"
             v-model="values[field.name]"
+            :id="`dialog-field-${field.name}`"
             :name="field.name"
             :required="field.required !== false"
             :disabled="busy"
@@ -102,6 +104,7 @@ function close() {
           <input
             v-else
             v-model="values[field.name]"
+            :id="`dialog-field-${field.name}`"
             :name="field.name"
             :type="field.type || 'text'"
             :required="field.required !== false"
@@ -109,7 +112,7 @@ function close() {
             maxlength="120"
           />
           <small v-if="field.help">{{ field.help }}</small>
-        </label>
+        </div>
         <slot name="after-fields" :busy="busy" />
       </div>
       <div class="modal-foot">
