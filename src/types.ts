@@ -148,7 +148,6 @@ export interface CodingSettings {
 export interface SettingsResponse {
   settings: CodingSettings;
   branches: { name: string }[];
-  executors: { worker_id: string; last_seen: string }[];
   permissions: ProjectPermissions;
   agents: { id: string; name: string; publishedVersion: number }[];
 }

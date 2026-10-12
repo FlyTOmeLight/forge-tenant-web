@@ -483,7 +483,6 @@ export function createPrototype() {
         { name: "develop" },
         { name: "pilot/injected-storagepath" },
       ],
-      executors: [{ worker_id: "原型模拟执行器", last_seen: now() }],
       permissions: projectPermissions(pid),
       agents: access(pid).manage
         ? [

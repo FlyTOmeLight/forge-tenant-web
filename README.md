@@ -15,7 +15,7 @@ npm run build
 开发服务固定使用 `http://127.0.0.1:8383`，API 代理默认 `http://127.0.0.1:8484`，可通过 `API_PROXY_TARGET` 修改；研发接口代理使用 `CODING_PROXY_TARGET`，默认 http://127.0.0.1:8485。后端 `PUBLIC_URL` 和 OIDC 回调必须与浏览器入口一致。运行 Vite 前释放已占用的 8383 端口；将后端 Service 转发至 8484：
 
 ```sh
-kubectl --context orbstack -n forge-tenant port-forward service/forge-tenant 8484:80
+kubectl --context orbstack -n forge-tenant-split port-forward service/forge-tenant 8484:80
 ```
 
 生产构建产出 `dist/`，由独立 Nginx 镜像服务。Go 镜像不包含前端代码。
@@ -26,7 +26,7 @@ kubectl --context orbstack -n forge-tenant port-forward service/forge-tenant 848
 
 ```sh
 FORGE_IMAGE_TAG=0.2.0 ./scripts/deploy-lab.sh
-kubectl --context orbstack -n forge-tenant port-forward service/forge-tenant-web 8383:80
+kubectl --context orbstack -n forge-tenant-split port-forward service/forge-tenant-web 8483:80
 ```
 
 Chart：`charts/forge-tenant-web`。默认上游为 `http://forge-tenant`；分 namespace 时通过 `api.upstream` 指定后端 Service DNS。镜像必须可被集群获取，OrbStack 可直接使用本机 Docker 镜像。远程集群设置可访问的 `image.repository` 与不可变版本号。
@@ -68,11 +68,11 @@ Vue 提供组件与响应式表单，Vite 负责 SFC 编译和生产打包；Typ
 
 旧的 claim 协议验收脚本已移除；新的任务验收调用 Agentic Kit。代码格式由 `npm run format` 统一，CI 执行 `npm run format:check`。
 
-## 本次独立验证环境
+## 当前本机环境
 
-为保留另一会话对原平台的并行修改，本轮使用 namespace `forge-tenant-split`、独立 PostgreSQL 和 OIDC client `forge-tenant-split-console`，浏览器入口为 `http://127.0.0.1:8483`。该环境中的企业和项目是验收数据；原 `forge-tenant` / 8383 及其数据未被切换或覆盖。
+当前工作台部署在 namespace `forge-tenant-split`，浏览器入口为 `http://127.0.0.1:8483`。租户后端使用 OIDC client `forge-tenant-split-console`。旧版一体化平台和静态租户预览部署已退役，当前原型由本仓库维护。
 
-继续更新此验证环境时使用 `FORGE_NAMESPACE=forge-tenant-split FORGE_IMAGE_TAG=0.5.1-roles ./scripts/deploy-lab.sh`。前端 E2E 同时设置 `FORGE_NAMESPACE=forge-tenant-split`。本机端口转发命令：
+部署脚本默认使用当前命名空间。更新时用 `FORGE_IMAGE_TAG=<版本> ./scripts/deploy-lab.sh`。前端 E2E 默认使用同一命名空间。本机端口转发命令：
 
 ```sh
 kubectl --context orbstack -n forge-tenant-split port-forward service/forge-tenant-web 8483:80
