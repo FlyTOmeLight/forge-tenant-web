@@ -16,3 +16,9 @@ ingress:
 
 coding:
   upstream: http://forge-coding
+
+# Optional metadata APIs. Empty values keep the reserved paths closed (404).
+artifact:
+  upstream: ""
+storage:
+  upstream: ""
