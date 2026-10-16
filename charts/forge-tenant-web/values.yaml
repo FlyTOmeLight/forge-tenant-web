@@ -22,3 +22,6 @@ artifact:
   upstream: ""
 storage:
   upstream: ""
+
+# Optional ConfigMap containing ca-certificates.crt (system roots plus private CAs).
+trustBundleConfigMap: ""

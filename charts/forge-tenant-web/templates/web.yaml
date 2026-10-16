@@ -81,6 +81,7 @@ spec:
         forge/coding-upstream: {{ .Values.coding.upstream | quote }}
         forge/artifact-upstream: {{ .Values.artifact.upstream | quote }}
         forge/storage-upstream: {{ .Values.storage.upstream | quote }}
+        forge/trust-bundle-config-map: {{ .Values.trustBundleConfigMap | default "" | quote }}
         forge/config-revision: {{ .Values.configRevision | default "initial" | quote }}
     spec:
       automountServiceAccountToken: false
@@ -101,11 +102,18 @@ spec:
           volumeMounts:
             - {name: nginx, mountPath: /etc/nginx/conf.d, readOnly: true}
             - {name: tmp, mountPath: /tmp}
+            {{- if .Values.trustBundleConfigMap }}
+            - {name: trust-bundle, mountPath: /etc/ssl/certs/ca-certificates.crt, subPath: ca-certificates.crt, readOnly: true}
+            {{- end }}
       volumes:
         - name: nginx
           configMap: {name: {{ .Release.Name }}-nginx}
         - name: tmp
           emptyDir: {}
+        {{- if .Values.trustBundleConfigMap }}
+        - name: trust-bundle
+          configMap: {name: {{ .Values.trustBundleConfigMap | quote }}}
+        {{- end }}
 ---
 apiVersion: v1
 kind: Service

@@ -47,6 +47,8 @@ helm template forge-tenant-web charts/forge-tenant-web \
 
 代理原样传递 Cookie、Origin、`X-CSRF-Token` 和 scope 选择头，不代填 Origin、不扩大 Cookie Domain；服务管理凭据只由服务端持有。metadata 请求上限为 8 MiB，文件内容按 storage 返回的 S3 URL 直接上传/下载，不经该代理。HTTPS 上游启用系统 CA 验证。
 
+私有 CA 上游可设置 `trustBundleConfigMap`，引用同 namespace 的 ConfigMap；其 `ca-certificates.crt` 必须包含系统根证书和所需私有 CA。证书包只读挂载；更新同名 ConfigMap 后需改变 `configRevision` 触发重启。
+
 本地 Vite 使用可选 `ARTIFACT_PROXY_TARGET` / `STORAGE_PROXY_TARGET`，路径和默认禁用规则相同。独立 Nginx 镜像的静态配置默认禁用两个入口；通过 Helm ConfigMap 开启。
 
 2026-10-16 本机隔离验证通过：`npm run build`、`helm lint`、默认/启用 `helm template` 与非法 origin 拒绝；现有 Nginx 1.28 Alpine 镜像的临时容器通过配置校验、v1 路径重写、原始头转发、内部路径 404 和 8 MiB 请求上限检查。Vite 默认/启用路由也已实测。所有 echo 服务、容器与网络均属临时验证；这不代表真实 Casdoor 登录、业务上传或集群部署验收。
