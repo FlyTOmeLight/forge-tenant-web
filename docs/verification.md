@@ -15,13 +15,13 @@
 - 旧实现的回归测试失败；修复后真实 PostgreSQL 全部 Go race 测试、Go vet、Helm lint 通过，数据库测试无跳过。
 - Vue 类型检查、构建和 Prettier 检查通过。
 - 真实浏览器使用上述任务，确认不存在“打开工作分支”链接，展示“打开 GitLab 项目”和未发布说明；点击后到达真实项目。已有 MR !3 的入口也通过回归。两种场景均只在 Forge 提交一次密码，GitLab 身份一致。
-- Coding API 与 Web 已部署 `0.7.1-delivery-links` 到 `forge-tenant-split`，未恢复任务执行或修改 GitLab 代码。
+- Coding API 与 Web 已部署 `0.7.1-delivery-links` 到本机联调 namespace，未恢复任务执行或修改 GitLab 代码。
 
 复现：前端仓库 `SSO_TASK_ID=task_95cfed62c2056e901ca33f25 SSO_EXPECT_TARGET=project npm run test:sso`；已有 MR 使用 `npm run test:sso`。脱敏结果与截图见前端 `.local/sso-evidence/result-project.json`、`result-mergeRequest.json`、`forge-project.png`。
 
 ## 2026-10-05：Forge → GitLab 单点登录
 
-部署于 `forge-tenant-split`，API/Web 镜像为 `0.7.0-sso`。Forge 入口 `http://127.0.0.1:8483`，GitLab 入口 `http://127.0.0.1:18080`。GitLab 继续使用 Chart 10.4.1 / CE 19.4.1。
+部署于本机联调 namespace，API/Web 镜像为 `0.7.0-sso`。Forge 入口 `http://127.0.0.1:8483`，GitLab 入口 `http://127.0.0.1:18080`。GitLab 继续使用 Chart 10.4.1 / CE 19.4.1。
 
 - 先用真实 PostgreSQL 回归测试复现身份 Cookie 被丢弃，旧实现失败；修复后后端全部 `go test -tags=nomsgpack -race -count=1 ./...` 通过，无数据库跳过；Go vet、Helm lint 通过。
 - Vue 类型检查、生产构建和 Prettier 检查通过；前后端镜像构建通过。
@@ -50,7 +50,7 @@
 - 真实任务 smoke 5 组通过，包含创建、审查、项目配置与停止确认。没有运行模型或合并 MR。
 - 新增角色目录和个人权限页在 375 / 768 / 1440 宽度无页面横向溢出；实际成员权限截图已人工检查。
 
-部署在 OrbStack Kubernetes `forge-tenant-split`：后端镜像 `0.5.0-roles`，前端 `0.5.1-roles`，由独立 Helm release 发布。入口 `http://127.0.0.1:8483`。私有截图和原始结果位于前端 `.local/roles-evidence/`。
+部署在本机 Kubernetes 联调 namespace：后端镜像 `0.5.0-roles`，前端 `0.5.1-roles`，由独立 Helm release 发布。入口 `http://127.0.0.1:8483`。私有截图和原始结果位于前端 `.local/roles-evidence/`。
 
 当前提供固定内置角色，不包含自定义角色编辑。团队在 Forge 内管理，计算后的每人项目角色同步到 GitLab。数据库迁移移除成员单团队字段，前后端需配套发布；具体接口见后端 `docs/api.md`。
 
@@ -70,7 +70,7 @@
 - 真实 OIDC / Casdoor / GitLab CE 租户 E2E 11 组通过：邀请、授权同步、跨租户隔离、降权立即生效、继承冲突、停用恢复、统一身份登录和撤权事件。
 - 真实 GitLab 任务 smoke 5 组通过：任务关联、按代码版本认可、停止确认、配置检查与新建任务、响应式与焦点。测试使用协议客户端，没有运行模型或合并 MR。
 
-部署环境为 OrbStack Kubernetes `forge-tenant-split`，API 使用 `0.4.0-permissions`、Web 使用 `0.4.1-permissions` 镜像及独立 Helm release。入口为 `http://127.0.0.1:8483`。私有原始证据保存在前端 `.local/permission-evidence/`。
+部署环境为本机 Kubernetes 联调 namespace，API 使用 `0.4.0-permissions`、Web 使用 `0.4.1-permissions` 镜像及独立 Helm release。入口为 `http://127.0.0.1:8483`。私有原始证据保存在前端 `.local/permission-evidence/`。
 
 接口变更必须配套发布前后端：租户创建和停用移至 `/api/v1/platform/tenants`，全局连接移至 `/api/v1/platform/connections`，全局账号列表移至 `/api/v1/platform/users`；删除旧路径及 `can_manage`/`canManage` 字段。服务鉴权、撤权事件和执行器协议保持现有契约。
 
@@ -89,7 +89,7 @@
 - 真实 OIDC / Casdoor / GitLab CE 租户 E2E 11 组通过，涵盖邀请激活、跨企业统一身份与隔离、权限升降级、继承冲突、停用恢复、CSRF、账号登录 GitLab及撤权事件。
 - 真实 GitLab 任务 smoke 5 组通过：已有 MR 关联、绑定版本的人工认可、协议客户端领取与停止确认、项目配置检查、直接创建无 MR 任务及配置快照、取消队列、四档宽度与弹窗焦点。
 
-部署为 OrbStack Kubernetes 的 `forge-tenant-split` namespace，前后端独立 Helm release；浏览器入口 `http://127.0.0.1:8483`。原 `forge-tenant` 应用与旧仓库保留。验收期间发现测试令牌在 2026-10-04 到期，已将同一 `tenant-lab-verification` 令牌有效期延至 2026-10-11，未改变令牌值或权限。
+部署为本机 Kubernetes 的联调 namespace，前后端独立 Helm release；浏览器入口 `http://127.0.0.1:8483`。原 `forge-tenant` 应用与旧仓库保留。验收期间发现测试令牌在 2026-10-04 到期，已将同一验收令牌有效期延至 2026-10-11，未改变令牌值或权限。
 
 任务 smoke 使用协议客户端，不执行模型。`tests/whole-app-e2e.cjs` 已适配 Vue，但真实模型修复、Draft MR 交付和业务案例验收留给下一步，不能将原型结果当作实际执行证据。执行器能力边界见后端 `docs/coding-tasks.md`。
 
@@ -109,7 +109,7 @@
 - 两套 Docker 构建和 Helm release；后端镜像只包含 Go 程序与 CA，前端镜像只包含静态页面及 Nginx。
 - Gin 实际注册租户、成员、项目、认证与任务路由；后端 `/`、`/invite` 等页面地址返回 JSON 404，由前端提供页面。
 - 最终镜像：`forge-tenant-api:0.2.0-final`、`forge-tenant-web:0.2.0-final`。
-- OrbStack namespace：`forge-tenant-split`，独立数据库。浏览器入口：`http://127.0.0.1:8483`。
+- 本机 Kubernetes 联调 namespace，独立数据库。浏览器入口：`http://127.0.0.1:8483`。
 - 原仓库、原 namespace 与 8383 服务未覆盖；测试数据与原企业数据分开。原仓库后来新增的项目执行配置和直接创建问题任务未纳入。
 
 ## 静态与数据库验证
