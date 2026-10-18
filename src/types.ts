@@ -4,6 +4,14 @@ export interface User {
   email: string;
   operator: boolean;
 }
+export interface Credential {
+  id: string;
+  name: string;
+  created_at: string;
+  expires_at: string;
+  revoked_at?: string | null;
+  user_id?: string;
+}
 export interface Tenant {
   id: string;
   name: string;

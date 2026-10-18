@@ -9,6 +9,7 @@
     "typecheck": "vue-tsc --noEmit",
     "preview": "vite preview --host 127.0.0.1",
     "test:e2e": "node tests/e2e.cjs",
+    "test:credentials": "node tests/credentials.cjs",
     "test:tasks": "node tests/coding-integration.cjs",
     "open": "node scripts/open-console.cjs",
     "format": "prettier --write src tests scripts/*.cjs *.ts *.json index.html",

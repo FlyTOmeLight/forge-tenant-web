@@ -4,6 +4,11 @@ const assert = require("node:assert/strict");
 const { execFileSync } = require("node:child_process");
 const { chromium } = require("playwright");
 const root = path.resolve(__dirname, "..");
+const serviceAPIKey = process.env.FORGE_SERVICE_API_KEY;
+if (!serviceAPIKey)
+  throw new Error(
+    "FORGE_SERVICE_API_KEY must contain an explicit service API key",
+  );
 const privateConfig = JSON.parse(
   fs.readFileSync(
     process.env.FORGE_CONFIG ||
@@ -622,7 +627,7 @@ const suffix = Date.now().toString(36),
       );
     const eventResponse = await admin.request.get(
       process.env.FORGE_INTERNAL_URL + "/internal/v1/access/events?after=0",
-      { headers: { Authorization: "Bearer " + privateConfig.serviceToken } },
+      { headers: { Authorization: "Bearer " + serviceAPIKey } },
     );
     assert.equal(eventResponse.status(), 200);
     assert.ok(
@@ -661,7 +666,7 @@ const suffix = Date.now().toString(36),
     await page
       .screenshot({ path: path.join(evidence, "failure.png"), fullPage: true })
       .catch(() => {});
-    let safe = String(e.stack);
+    let safe = String(e.stack).replaceAll(serviceAPIKey, "[redacted]");
     for (const v of [...Object.values(privateConfig), ...Object.values(lab)])
       if (typeof v === "string" && v.length >= 12)
         safe = safe.replaceAll(v, "[redacted]");
