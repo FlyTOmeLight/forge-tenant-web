@@ -9,6 +9,7 @@ import CodingWorkspace from "./CodingWorkspace.vue";
 import PermissionDetails from "../components/PermissionDetails.vue";
 import TeamsPanel from "../components/TeamsPanel.vue";
 import RolesView from "./RolesView.vue";
+import CredentialsView from "./CredentialsView.vue";
 import { demo } from "../prototype";
 const navs = [
   ["tasks", "我的任务"],
@@ -24,6 +25,7 @@ const navs = [
 ];
 const platformPermissions = ref({ managePlatform: false });
 const platformMode = computed(() => view.value.startsWith("platform/"));
+const accountMode = computed(() => view.value === "account/credentials");
 const workspaceNavs = computed(() => navs.slice(0, 4));
 const settingsNavs = computed(() =>
   navs
@@ -44,10 +46,12 @@ const visibleNavs = computed(() =>
     : [...workspaceNavs.value, ...settingsNavs.value],
 );
 const allowedView = computed(() =>
-  platformMode.value
-    ? platformPermissions.value.managePlatform
-    : visibleNavs.value.some(([id]) => id === view.value) ||
-      /^(task|project)\//.test(view.value),
+  accountMode.value
+    ? true
+    : platformMode.value
+      ? platformPermissions.value.managePlatform
+      : visibleNavs.value.some(([id]) => id === view.value) ||
+        /^(task|project)\//.test(view.value),
 );
 const companyRoles = [
   { value: "member", label: "普通成员" },
@@ -70,7 +74,7 @@ let poll: ReturnType<typeof setInterval>,
 const refreshVersion = ref(0);
 function refreshAll() {
   refreshVersion.value++;
-  void refresh();
+  if (!accountMode.value) void refresh();
 }
 const manage = computed(() => !!data.value?.permissions.manageMembers);
 const tenant = computed(() => data.value?.tenant);
@@ -83,7 +87,9 @@ const coding = computed(() =>
 );
 const heading = computed(
   () =>
-    navs.find((n) => n[0] === view.value)?.[1] ||
+    (accountMode.value
+      ? "API 密钥"
+      : navs.find((n) => n[0] === view.value)?.[1]) ||
     (view.value.startsWith("task/")
       ? "任务详情"
       : view.value.startsWith("project/")
@@ -151,7 +157,9 @@ async function enter(id: string) {
 function hashChanged() {
   const next = location.hash.slice(1);
   view.value =
-    navs.some((n) => n[0] === next) || /^(task|project)\//.test(next)
+    next === "account/credentials" ||
+    navs.some((n) => n[0] === next) ||
+    /^(task|project)\//.test(next)
       ? next
       : defaultView;
   query.value = "";
@@ -342,6 +350,7 @@ onMounted(async () => {
   poll = setInterval(() => {
     if (
       user.value &&
+      !accountMode.value &&
       !loading.value &&
       !document.hidden &&
       !dialog.value &&
@@ -414,7 +423,7 @@ const actionNames: Record<string, string> = {
     aria-label="管理导航"
   >
     <div class="brand"><span class="mark" aria-hidden="true">F</span>Forge</div>
-    <template v-if="!platformMode"
+    <template v-if="!platformMode && !accountMode"
       ><label class="switch-label" for="tenant-switch">当前租户</label
       ><select
         id="tenant-switch"
@@ -462,6 +471,15 @@ const actionNames: Record<string, string> = {
       </template>
     </nav>
     <div class="side-bottom">
+      <button
+        v-if="user && !demo"
+        class="nav"
+        :class="{ active: accountMode }"
+        :aria-current="accountMode ? 'page' : undefined"
+        @click="navigate('account/credentials')"
+      >
+        API 密钥
+      </button>
       <button
         v-if="platformPermissions.managePlatform && !platformMode"
         class="nav platform-entry"
@@ -511,7 +529,14 @@ const actionNames: Record<string, string> = {
           ☰
         </button>
         <div class="breadcrumb">
-          {{ platformMode ? "平台管理" : tenant?.name || "工作区" }} /
+          {{
+            accountMode
+              ? "账号"
+              : platformMode
+                ? "平台管理"
+                : tenant?.name || "工作区"
+          }}
+          /
           <strong id="crumb">{{ heading }}</strong>
         </div>
       </div>
@@ -540,7 +565,9 @@ const actionNames: Record<string, string> = {
         </select></label
       ><button class="btn small" @click="resetDemo">重置演示</button>
     </div>
-    <div id="status" class="status-banner" role="status">{{ status }}</div>
+    <div v-if="!accountMode" id="status" class="status-banner" role="status">
+      {{ status }}
+    </div>
     <main
       id="main"
       ref="main"
@@ -548,7 +575,10 @@ const actionNames: Record<string, string> = {
       tabindex="-1"
       :aria-busy="loading"
     >
-      <div v-if="!coding && !platformMode && allowedView" class="heading">
+      <div
+        v-if="!accountMode && !coding && !platformMode && allowedView"
+        class="heading"
+      >
         <div>
           <h1>{{ heading }}</h1>
           <p class="subtitle">
@@ -568,7 +598,7 @@ const actionNames: Record<string, string> = {
         </button>
       </div>
       <div
-        v-if="!platformMode && tenant?.status === 'suspended'"
+        v-if="!accountMode && !platformMode && tenant?.status === 'suspended'"
         class="notice danger"
       >
         企业已停用，平台访问资格已撤销；GitLab 撤权结果见同步记录。
@@ -577,6 +607,11 @@ const actionNames: Record<string, string> = {
         <h2>你没有此页面的访问权限</h2>
         <button class="btn" @click="navigate('tasks')">返回工作台</button>
       </div>
+      <CredentialsView
+        v-else-if="accountMode && user"
+        :key="user.id"
+        :refresh-version="refreshVersion"
+      />
       <PlatformView
         v-else-if="platformMode"
         :view="view"
