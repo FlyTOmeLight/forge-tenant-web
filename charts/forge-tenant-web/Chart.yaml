@@ -2,5 +2,5 @@ apiVersion: v2
 name: forge-tenant-web
 description: Vue enterprise console with a same-origin API gateway
 type: application
-version: 0.2.0
+version: 0.3.0
 appVersion: "0.2.0"

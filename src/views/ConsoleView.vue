@@ -10,6 +10,7 @@ import PermissionDetails from "../components/PermissionDetails.vue";
 import TeamsPanel from "../components/TeamsPanel.vue";
 import RolesView from "./RolesView.vue";
 import { demo } from "../prototype";
+import { features } from "../runtime-config";
 const navs = [
   ["tasks", "我的任务"],
   ["reviews", "待我审查"],
@@ -24,7 +25,9 @@ const navs = [
 ];
 const platformPermissions = ref({ managePlatform: false });
 const platformMode = computed(() => view.value.startsWith("platform/"));
-const workspaceNavs = computed(() => navs.slice(0, 4));
+const workspaceNavs = computed(() =>
+  navs.slice(features.coding.enabled ? 0 : 2, 4),
+);
 const settingsNavs = computed(() =>
   navs
     .slice(4, 8)
@@ -39,7 +42,11 @@ const settingsNavs = computed(() =>
 const visibleNavs = computed(() =>
   platformMode.value
     ? platformPermissions.value.managePlatform
-      ? navs.slice(8)
+      ? navs
+          .slice(8)
+          .filter(
+            ([id]) => id !== "platform/connections" || features.coding.enabled,
+          )
       : []
     : [...workspaceNavs.value, ...settingsNavs.value],
 );
@@ -57,8 +64,8 @@ const user = ref<User>(),
   tenants = ref<Tenant[]>([]),
   data = ref<Snapshot>(),
   current = ref(sessionStorage.getItem("forge-tenant") || "");
-const defaultView = "tasks";
-const view = ref(location.hash.slice(1) || defaultView),
+const defaultView = features.coding.enabled ? "tasks" : "spaces";
+const view = ref(normalizeRoute(location.hash.slice(1) || defaultView)),
   query = ref(""),
   tab = ref("members"),
   loading = ref(false),
@@ -136,7 +143,21 @@ async function refresh() {
     if (ticket === refreshGeneration) loading.value = false;
   }
 }
+function normalizeRoute(value: string) {
+  const parts = value.split("?")[0]!.split("/");
+  if (!features.coding.enabled) {
+    if (
+      ["tasks", "reviews", "task"].includes(parts[0]!) ||
+      (parts[0] === "platform" && parts[1] === "connections")
+    )
+      return defaultView;
+    if (parts[0] === "project" && parts[1] && parts[2] !== "members")
+      return `project/${parts[1]}/members`;
+  }
+  return value;
+}
 function navigate(value: string) {
+  value = normalizeRoute(value);
   view.value = value;
   query.value = "";
   location.hash = value;
@@ -145,11 +166,11 @@ function navigate(value: string) {
 async function enter(id: string) {
   data.value = undefined;
   current.value = id;
-  navigate("tasks");
+  navigate(defaultView);
   await refresh();
 }
 function hashChanged() {
-  const next = location.hash.slice(1);
+  const next = normalizeRoute(location.hash.slice(1));
   view.value =
     navs.some((n) => n[0] === next) || /^(task|project)\//.test(next)
       ? next
@@ -377,7 +398,7 @@ async function acceptDemo(id: string) {
 async function resetDemo() {
   demo?.reset();
   current.value = "";
-  navigate("tasks");
+  navigate(defaultView);
   await switchDemo(demo!.user().id);
 }
 const actionNames: Record<string, string> = {
@@ -471,7 +492,7 @@ const actionNames: Record<string, string> = {
       ><button
         v-if="platformMode"
         class="nav platform-entry"
-        @click="navigate('tasks')"
+        @click="navigate(defaultView)"
       >
         ← 返回工作区
       </button>
@@ -575,7 +596,7 @@ const actionNames: Record<string, string> = {
       </div>
       <div v-if="!allowedView" class="empty">
         <h2>你没有此页面的访问权限</h2>
-        <button class="btn" @click="navigate('tasks')">返回工作台</button>
+        <button class="btn" @click="navigate(defaultView)">返回工作台</button>
       </div>
       <PlatformView
         v-else-if="platformMode"

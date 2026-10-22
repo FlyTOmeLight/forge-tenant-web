@@ -2,6 +2,7 @@
 import { computed, onUnmounted, ref, shallowRef, watch } from "vue";
 import { api, message } from "../api";
 import { demo } from "../prototype";
+import { features } from "../runtime-config";
 import type {
   Field,
   Project,
@@ -49,7 +50,9 @@ const currentProject = computed(() =>
 const projectTab = computed(
   () =>
     props.view.split("/")[2] ||
-    (currentProject.value?.permissions.readCode ? "tasks" : "members"),
+    (features.coding.enabled && currentProject.value?.permissions.readCode
+      ? "tasks"
+      : "members"),
 );
 const taskListing = computed(
   () =>
@@ -131,8 +134,8 @@ async function refresh() {
     let settings: SettingsResponse | undefined;
     let projectPeople: ProjectPerson[] = [];
     if (
-      ["tasks", "reviews", "spaces"].includes(props.view) ||
-      taskListing.value
+      features.coding.enabled &&
+      (["tasks", "reviews", "spaces"].includes(props.view) || taskListing.value)
     )
       loaded = (
         await Promise.all(
@@ -146,7 +149,11 @@ async function refresh() {
       )
         .flat()
         .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
-    if (projectView.value && currentProject.value?.permissions.readCode) {
+    if (
+      features.coding.enabled &&
+      projectView.value &&
+      currentProject.value?.permissions.readCode
+    ) {
       if (projectTab.value === "execution")
         settings = await api<SettingsResponse>(
           base(pid.value) + "/coding-settings",
@@ -445,7 +452,7 @@ void refresh();
       </div>
       <nav class="tabs project-tabs" aria-label="项目导航">
         <button
-          v-if="currentProject.permissions.readCode"
+          v-if="features.coding.enabled && currentProject.permissions.readCode"
           class="tab"
           :class="{ active: projectTab === 'tasks' }"
           @click="emit('navigate', 'project/' + pid + '/tasks')"
@@ -462,7 +469,7 @@ void refresh();
         >
           成员与权限</button
         ><button
-          v-if="currentProject.permissions.readCode"
+          v-if="features.coding.enabled && currentProject.permissions.readCode"
           class="tab"
           :class="{ active: projectTab === 'execution' }"
           @click="emit('navigate', 'project/' + pid + '/execution')"
@@ -683,7 +690,13 @@ void refresh();
       ><div class="task-heading">
         <div>
           <h1>项目</h1>
-          <p class="muted">项目代码权限决定任务与配置的可见范围。</p>
+          <p class="muted">
+            {{
+              features.coding.enabled
+                ? "项目代码权限决定任务与配置的可见范围。"
+                : "管理项目、成员与访问权限。"
+            }}
+          </p>
         </div>
         <button
           v-if="snapshot.permissions.manageProjects"
@@ -698,8 +711,12 @@ void refresh();
           <h2>{{ p.name }}</h2>
           <p class="mono">{{ p.path }}</p>
           <p>
-            {{ tasks.filter((t) => t.projectId === p.id && !ended(t)).length }}
-            项未完成任务 ·
+            <template v-if="features.coding.enabled"
+              >{{
+                tasks.filter((t) => t.projectId === p.id && !ended(t)).length
+              }}
+              项未完成任务 ·</template
+            >
             {{
               p.permissions.configureExecution
                 ? "项目管理员"

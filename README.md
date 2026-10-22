@@ -15,18 +15,17 @@ npm run build
 开发服务固定使用 `http://127.0.0.1:8383`，API 代理默认 `http://127.0.0.1:8484`，可通过 `API_PROXY_TARGET` 修改；研发接口代理使用 `CODING_PROXY_TARGET`，默认 http://127.0.0.1:8485。后端 `PUBLIC_URL` 和 OIDC 回调必须与浏览器入口一致。运行 Vite 前释放已占用的 8383 端口；将后端 Service 转发至 8484：
 
 ```sh
-kubectl --context orbstack -n forge-tenant-split port-forward service/forge-tenant 8484:80
+kubectl --context orbstack -n forge port-forward service/forge-tenant 8484:80
 ```
 
 生产构建产出 `dist/`，由独立 Nginx 镜像服务。Go 镜像不包含前端代码。
 
 ## Kubernetes / Helm
 
-后端先部署到同 namespace。前端独立构建和发布：
+当前本机环境通过相邻 `artifact-go` 仓库的 `charts/forge` umbrella chart 安装与升级，namespace 和 release 均为 `forge`；父 chart 统一配置后端地址、信任包及 Coding/Agent 开关。旧独立部署脚本已移除。
 
 ```sh
-FORGE_IMAGE_TAG=0.2.0 ./scripts/deploy-lab.sh
-kubectl --context orbstack -n forge-tenant-split port-forward service/forge-tenant-web 8483:80
+kubectl --context orbstack -n forge port-forward service/forge-web 8483:80
 ```
 
 Chart：`charts/forge-tenant-web`。默认上游为 `http://forge-tenant`；分 namespace 时通过 `api.upstream` 指定后端 Service DNS。镜像必须可被集群获取，OrbStack 可直接使用本机 Docker 镜像。远程集群设置可访问的 `image.repository` 与不可变版本号。
@@ -74,9 +73,10 @@ tests/             真实环境端到端测试
 npm run build
 npm audit --audit-level=high
 helm lint charts/forge-tenant-web
-FORGE_NAMESPACE=forge-tenant-split FORGE_INTERNAL_URL=http://127.0.0.1:18484 LAB_CONFIG=/path/to/lab/infra.json npm run test:e2e
 FORGE_CODING_PILOT=/path/to/pilot.json npm run test:tasks
 ```
+
+当前 Forge 部署的真实登录、四类 scope 与重启回收验收使用 `artifact-go/deploy/acceptance/forge-redeploy.cjs`，显式指定受限登录配置及 scope。下述完整权限 E2E 仍含独立 release 的 Worker 操作，尚未适配 umbrella 环境，不应直接对 `forge` 运行。
 
 E2E 默认从兄弟仓库 `../forge-tenant-api/.local/deployment.json` 读取测试配置，支持 `FORGE_CONFIG` 覆盖。暂停并恢复 Worker 的检查从 `FORGE_API_ROOT`（默认兄弟后端仓库）读取后端 Chart。测试会创建独立租户、用户和项目，并修改测试授权。结果与截图放 `.local/`，不提交凭证或登录会话。
 
@@ -90,12 +90,10 @@ Vue 提供组件与响应式表单，Vite 负责 SFC 编译和生产打包；Typ
 
 ## 当前本机环境
 
-当前工作台部署在 namespace `forge-tenant-split`，浏览器入口为 `http://127.0.0.1:8483`。租户后端使用 OIDC client `forge-tenant-split-console`。旧版一体化平台和静态租户预览部署已退役，当前原型由本仓库维护。
-
-部署脚本默认使用当前命名空间。更新时用 `FORGE_IMAGE_TAG=<版本> ./scripts/deploy-lab.sh`。前端 E2E 默认使用同一命名空间。本机端口转发命令：
+当前工作台部署在 namespace / release `forge`，浏览器入口为 `http://127.0.0.1:8483`，租户后端使用专用 OIDC client `forge-forge-console`。Coding 和 Agent 在本次安装中关闭。升级入口为 `artifact-go/charts/forge`；旧独立部署环境已退役。
 
 ```sh
-kubectl --context orbstack -n forge-tenant-split port-forward service/forge-tenant-web 8483:80
+kubectl --context orbstack -n forge port-forward service/forge-web 8483:80
 ```
 
 后续功能已迁入：项目执行配置与接入检查、直接新建问题任务、多审查者、每轮配置快照、Agent 判断、代码差异，以及统一导航下的三种任务布局。研发业务现已迁到独立 forge-coding-api，真实模型交付结果见该仓库的验证记录。
