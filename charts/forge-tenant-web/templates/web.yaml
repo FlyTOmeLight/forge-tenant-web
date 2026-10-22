@@ -1,5 +1,5 @@
 {{- range $name := list "artifact" "storage" }}
-{{- $upstream := index $.Values $name "upstream" }}
+{{- $upstream := include "forge-tenant-web.metadataUpstream" (dict "root" $ "name" $name) }}
 {{- if and $upstream (not (regexMatch "^https?://[A-Za-z0-9][A-Za-z0-9.-]*(:[0-9]{1,5})?/?$" $upstream)) }}
 {{- fail (printf "%s.upstream must be an HTTP(S) origin with a DNS name or IPv4 host and optional port" $name) }}
 {{- end }}
@@ -7,8 +7,9 @@
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: {{ .Release.Name }}-nginx
+  name: {{ include "forge-tenant-web.nginxName" . }}
 data:
+  runtime-config.json: {{ dict "coding" (dict "enabled" .Values.coding.enabled) "agent" (dict "enabled" .Values.agent.enabled) | toJson | quote }}
   default.conf: |
     server {
       listen 8080;
@@ -21,12 +22,13 @@ data:
       add_header Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; frame-ancestors 'none'; base-uri 'none'; form-action 'self'" always;
       access_log off;
       location = /healthz { access_log off; return 200 'ok'; }
+      location = /runtime-config.json { alias /etc/forge/runtime-config.json; default_type application/json; }
       location ^~ /internal/ { return 404; }
       # Only the public v1 namespaces are forwarded; every other reserved path fails closed.
       {{- range $name := list "artifact" "storage" }}
       location = /{{ $name }} { return 404; }
       location ^~ /{{ $name }}/v1/ {
-        {{- $upstream := index $.Values $name "upstream" }}
+        {{- $upstream := include "forge-tenant-web.metadataUpstream" (dict "root" $ "name" $name) }}
         {{- if $upstream }}
         client_max_body_size 8m;
         proxy_pass {{ trimSuffix "/" $upstream }}/v1/;
@@ -44,20 +46,39 @@ data:
       }
       location ^~ /{{ $name }}/ { return 404; }
       {{- end }}
-      location ~ ^/api/v1/(tenants/[^/]+/projects/[^/]+/(tasks|coding-settings)(/|$)|platform/connections$) {
-        proxy_pass {{ required "coding.upstream is required" .Values.coding.upstream }};
+      location ~ ^/api/v1/tenants/[^/]+(/projects/[^/]+)?/(agents|agent-templates|agent-workspace|evaluations|evaluation-plans|datasets)(/|$) {
+        {{- if .Values.agent.enabled }}
+        proxy_pass {{ required "agent.upstream is required when agent.enabled=true" .Values.agent.upstream }};
+        proxy_http_version 1.1;
+        proxy_set_header Host $http_host;
+        proxy_read_timeout 60s;
+        {{- else }}
+        default_type application/json;
+        return 404 '{"message":"Agent is disabled"}';
+        {{- end }}
+      }
+      location ~ ^/api/v1/(tenants/[^/]+/projects/[^/]+/(tasks|coding-settings|coding-releases)(/|$)|platform/connections$) {
+        {{- if .Values.coding.enabled }}
+        proxy_pass {{ required "coding.upstream is required when coding.enabled=true" .Values.coding.upstream }};
         proxy_http_version 1.1;
         proxy_set_header Host $http_host;
         proxy_set_header X-Forwarded-Proto $scheme;
         proxy_buffering off;
         proxy_read_timeout 3600s;
+        {{- else }}
+        default_type application/json;
+        return 404 '{"message":"Coding is disabled"}';
+        {{- end }}
       }
       location ~ ^/(api|auth)/ {
-        proxy_pass {{ required "api.upstream is required" .Values.api.upstream }};
+        proxy_pass {{ include "forge-tenant-web.apiUpstream" . }};
         proxy_http_version 1.1;
         proxy_set_header Host $http_host;
         proxy_set_header X-Forwarded-Proto $scheme;
         proxy_set_header X-Forwarded-For $remote_addr;
+        proxy_ssl_server_name on;
+        proxy_ssl_verify on;
+        proxy_ssl_trusted_certificate /etc/ssl/certs/ca-certificates.crt;
         proxy_buffering off;
         proxy_read_timeout 3600s;
       }
@@ -68,20 +89,23 @@ data:
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: {{ .Release.Name }}
+  name: {{ include "forge-tenant-web.fullname" . }}
 spec:
   replicas: {{ .Values.replicas }}
   selector:
-    matchLabels: {app: {{ .Release.Name }}}
+    matchLabels: {app: {{ include "forge-tenant-web.fullname" . }}}
   template:
     metadata:
-      labels: {app: {{ .Release.Name }}}
+      labels: {app: {{ include "forge-tenant-web.fullname" . }}}
       annotations:
-        forge/upstream: {{ .Values.api.upstream | quote }}
+        forge/upstream: {{ include "forge-tenant-web.apiUpstream" . | quote }}
+        forge/agent-upstream: {{ .Values.agent.upstream | quote }}
         forge/coding-upstream: {{ .Values.coding.upstream | quote }}
-        forge/artifact-upstream: {{ .Values.artifact.upstream | quote }}
-        forge/storage-upstream: {{ .Values.storage.upstream | quote }}
-        forge/trust-bundle-config-map: {{ .Values.trustBundleConfigMap | default "" | quote }}
+        forge/artifact-upstream: {{ include "forge-tenant-web.metadataUpstream" (dict "root" . "name" "artifact") | quote }}
+        forge/storage-upstream: {{ include "forge-tenant-web.metadataUpstream" (dict "root" . "name" "storage") | quote }}
+        forge/trust-bundle-config-map: {{ include "forge-tenant-web.trustBundle" . | quote }}
+        forge/coding-enabled: {{ .Values.coding.enabled | quote }}
+        forge/agent-enabled: {{ .Values.agent.enabled | quote }}
         forge/config-revision: {{ .Values.configRevision | default "initial" | quote }}
     spec:
       automountServiceAccountToken: false
@@ -101,24 +125,31 @@ spec:
             capabilities: {drop: [ALL]}
           volumeMounts:
             - {name: nginx, mountPath: /etc/nginx/conf.d, readOnly: true}
+            - {name: runtime, mountPath: /etc/forge, readOnly: true}
             - {name: tmp, mountPath: /tmp}
-            {{- if .Values.trustBundleConfigMap }}
+            {{- if include "forge-tenant-web.trustBundle" . }}
             - {name: trust-bundle, mountPath: /etc/ssl/certs/ca-certificates.crt, subPath: ca-certificates.crt, readOnly: true}
             {{- end }}
       volumes:
         - name: nginx
-          configMap: {name: {{ .Release.Name }}-nginx}
+          configMap:
+            name: {{ include "forge-tenant-web.nginxName" . }}
+            items: [{key: default.conf, path: default.conf}]
+        - name: runtime
+          configMap:
+            name: {{ include "forge-tenant-web.nginxName" . }}
+            items: [{key: runtime-config.json, path: runtime-config.json}]
         - name: tmp
           emptyDir: {}
-        {{- if .Values.trustBundleConfigMap }}
+        {{- if include "forge-tenant-web.trustBundle" . }}
         - name: trust-bundle
-          configMap: {name: {{ .Values.trustBundleConfigMap | quote }}}
+          configMap: {name: {{ include "forge-tenant-web.trustBundle" . | quote }}}
         {{- end }}
 ---
 apiVersion: v1
 kind: Service
 metadata:
-  name: {{ .Release.Name }}
+  name: {{ include "forge-tenant-web.fullname" . }}
 spec:
-  selector: {app: {{ .Release.Name }}}
+  selector: {app: {{ include "forge-tenant-web.fullname" . }}}
   ports: [{port: 80, targetPort: 8080}]

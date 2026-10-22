@@ -9,6 +9,7 @@
     "typecheck": "vue-tsc --noEmit",
     "preview": "vite preview --host 127.0.0.1",
     "test:e2e": "node tests/e2e.cjs",
+    "test:features": "node tests/feature-flags.cjs",
     "test:tasks": "node tests/coding-integration.cjs",
     "open": "node scripts/open-console.cjs",
     "format": "prettier --write src tests scripts/*.cjs *.ts *.json index.html",
@@ -30,7 +31,7 @@
     "playwright": "1.58.2",
     "prettier": "3.6.2",
     "typescript": "~5.9.3",
-    "vite": "8.3.2",
+    "vite": "8.3.5",
     "vue-tsc": "3.3.12"
   },
   "engines": {

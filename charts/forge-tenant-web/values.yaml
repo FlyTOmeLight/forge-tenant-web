@@ -1,3 +1,5 @@
+fullnameOverride: ""
+
 image:
   repository: forge-tenant-web
   tag: dev
@@ -14,8 +16,14 @@ ingress:
   host: ""
   tlsSecret: ""
 
+# Disabling a feature closes its API proxy and frontend routes/navigation.
 coding:
+  enabled: true
   upstream: http://forge-coding
+
+agent:
+  enabled: false
+  upstream: http://agentic-kit-api
 
 # Optional metadata APIs. Empty values keep the reserved paths closed (404).
 artifact:
