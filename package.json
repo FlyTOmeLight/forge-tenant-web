@@ -31,7 +31,7 @@
     "playwright": "1.58.2",
     "prettier": "3.6.2",
     "typescript": "~5.9.3",
-    "vite": "8.3.2",
+    "vite": "8.3.5",
     "vue-tsc": "3.3.12"
   },
   "engines": {
